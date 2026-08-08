@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 2: 31/31 backend pytest cases pass (11 new for iteration-2 features + 20 regression). All new endpoints verified end-to-end: Categories CRUD + default seed on /api/categories, investment withdraw with add_to_income true/false (income_tx_id populated/null, expense category 'Investment Withdrawal'), expected_return_type round-trip (percent->amount), loan compute forward (P/R/N -> EMI=9321.31, total_payable=2237114, end_date=2042-01-15) and inverse (E/N/P -> R=9.5%), loan enrich for backdated 24-month loan returns months_elapsed/expected_paid_to_date/expected_remaining, reminders SIP (creates expense tx with category 'SIP', marks paid_months, hides from next list) and loan EMI (creates 'EMI' expense tx AND records loan payment so remaining_balance reduces by 5000), dashboard date-range filter correctly scopes income/expense. Frontend smoke: login -> dashboard renders with 'All time / 1 yr / 3 mo / This month' range pills, 'DUE THIS MONTH' reminders card with one-tap Pay button, More -> Categories screen accessible with Expense/Income tabs, Add input, default categories (Groceries/Rent/Utilities/Food/Transport/Shopping/Health/Education) listed with edit/delete buttons. No deprecated Expo packages detected. No critical issues.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/loans/compute", "issue": "Inverse-rate bisection picks the lower bound when target is unreachable (target < emi*N at r=0). Not exercised by spec but worth a guard."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "(app)/index.tsx", "issues": ["Range pills row works but the active pill ('This month' default) is visually identical-ish to inactive on first paint — consider higher contrast for active state."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2.py",
+    "/app/backend/tests/test_family_finance.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Add a guard in /api/loans/compute when bisection cannot reach the target rate (return null/error instead of clamped boundary).",
+    "(Optional) Add testIDs to range pills (e.g. range-pill-all, range-pill-1y, range-pill-3m, range-pill-thismonth) and to the reminders Pay button (reminder-pay-<id>) to make Playwright assertions selector-stable."
+  ],
+  "critical_code_review_comments": [
+    "ensure_default_categories is correctly idempotent (early-return when any category exists for user) — good.",
+    "withdraw_inv sets income_tx_id=None when add_to_income=False and inserts a transaction with source='withdrawal' + source_id=inv_id when True — clean linkage.",
+    "enrich_loan auto-closes when remaining_balance hits 0 — nice but mutates only in response (not DB); ensure list filter handles this consistently with the explicit close endpoint.",
+    "Reminders use $addToSet on paid_months — correctly idempotent per month.",
+    "loan_compute end-date calc uses min(sd.day, 28) which works around month-length issues but loses day fidelity for loans starting on the 29th-31st (acceptable trade-off)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (31/31)",
+    "frontend": "100% of critical smoke flows (login, dashboard with range pills + reminders card + Pay button, More -> Categories with defaults visible)"
+  },
+  "seed_data_creation": "auth_session fixture registers a fresh TEST_<uuid>@family.app per test session. Test data prefixed TEST_ for the categories/investments/loans created during iteration-2 cases.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/{test_family_finance.py, test_iteration2.py}. Run: cd /app/backend && pytest tests/ -v (31 tests, ~6s). demo@family.app/demo1234 works. Range pills on dashboard render as plain text labels ('All time','1 yr','3 mo','This month'); reminders card shows 'DUE THIS MONTH' with Pay button — no dedicated testIDs yet, locate via text. Categories screen reachable via More -> Categories; default categories include Groceries, Rent, Utilities, Food, Transport, Shopping, Health, Education, EMI, SIP, Other (expense) and Salary, Bonus, Interest, Dividend, Rental, Investment Withdrawal, Other (income).",
+  "rca_of_issue": "No bugs found in iteration-2 scope. All new features (Categories CRUD, withdraw income tx, expected_return_type round-trip, loan compute forward+inverse, backdated loan enrichment, SIP/EMI reminders, dashboard date-range) work as specified."
+}

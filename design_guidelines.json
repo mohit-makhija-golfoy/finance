@@ -1,0 +1,97 @@
+{
+  "theme": "Dark and Light Mode Supported",
+  "archetype": "Archetype 5 (Luxury) + Archetype 4 (Swiss & High-Contrast)",
+  "typography": {
+    "headings": {
+      "fontFamily": "Outfit",
+      "weights": ["400", "700"],
+      "usage": "Use for all screen titles, total balance numbers, and primary data points."
+    },
+    "body": {
+      "fontFamily": "Manrope",
+      "weights": ["400", "500", "600"],
+      "usage": "Use for list items, descriptions, labels, and secondary text."
+    },
+    "scaling": {
+      "h1": "text-4xl md:text-5xl tracking-tight",
+      "h2": "text-2xl md:text-3xl tracking-tight",
+      "h3": "text-xl font-medium",
+      "body": "text-base",
+      "small": "text-sm text-zinc-500 uppercase tracking-widest"
+    }
+  },
+  "colors": {
+    "dark": {
+      "background": "#09090B",
+      "surface": "#18181B",
+      "border": "#27272A",
+      "primary": "#FAFAFA",
+      "primaryText": "#09090B",
+      "text": "#FAFAFA",
+      "textMuted": "#A1A1AA",
+      "positive": "#10B981",
+      "negative": "#F43F5E",
+      "chartLine": "#FAFAFA"
+    },
+    "light": {
+      "background": "#FDFDFD",
+      "surface": "#FFFFFF",
+      "border": "#E4E4E7",
+      "primary": "#09090B",
+      "primaryText": "#FAFAFA",
+      "text": "#09090B",
+      "textMuted": "#71717A",
+      "positive": "#059669",
+      "negative": "#E11D48",
+      "chartLine": "#09090B"
+    }
+  },
+  "layout_and_spacing": {
+    "screen_padding": "px-6 py-8",
+    "card_padding": "p-6",
+    "gap_standard": "gap-4",
+    "gap_large": "gap-8",
+    "border_radius": {
+      "card": "rounded-3xl",
+      "button": "rounded-full",
+      "chip": "rounded-full"
+    }
+  },
+  "components": {
+    "cards": "Cardless feeling where possible. If a card is needed, use solid background (surface color) with a 1px border. No drop shadows. For the Total Net Worth card, use the abstract texture background.",
+    "buttons": "Pill shaped (rounded-full). Primary buttons have high contrast (White bg in dark mode, Black bg in light mode). Active scale down on press.",
+    "chips": "For member multi-select and filters. Unselected: surface background, text muted. Selected: inverted (primary background, primaryText color).",
+    "charts": "Line graphs must have smooth monotone X curves. Use a subtle linear gradient fill under the line extending to the bottom of the chart.",
+    "forms": "Inputs should have large tap targets (min height 48px). Floating labels or clear bold labels outside. Subtle borders, focus state highlights border with primary color.",
+    "bottom_tab_bar": "Floating pill design or border-t only with clear active/inactive icon states."
+  },
+  "icons": "lucide-react-native or @expo/vector-icons. Prefer minimal, stroke-based icons (strokeWidth 1.5).",
+  "media": {
+    "images": [
+      {
+        "category": "card_background_dark",
+        "description": "Premium dark abstract waves for the Total Net Worth summary card in dark mode.",
+        "url": "https://images.pexels.com/photos/29041985/pexels-photo-29041985.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+      },
+      {
+        "category": "card_background_light",
+        "description": "Premium light abstract waves for the Total Net Worth summary card in light mode.",
+        "url": "https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGxpZ2h0JTIwd2F2ZXMlMjB0ZXh0dXJlfGVufDB8fHx8MTc4MDY0NDMxOXww&ixlib=rb-4.1.0&q=85"
+      }
+    ]
+  },
+  "testing": {
+    "attributes": "All interactive and key informational elements MUST include a testID attribute (React Native equivalent of data-testid) formatted in kebab-case."
+  },
+  "instructions_to_main_agent": [
+    "This is a React Native Expo app utilizing .js files (no TypeScript). Translate styling guidelines into NativeWind classes or React Native StyleSheet objects.",
+    "Strictly adhere to the dark/light mode color palette provided. Implement theming carefully.",
+    "Use 'testID' instead of 'data-testid' for all interactive elements like buttons, inputs, and list items, e.g., testID='login-submit-button'.",
+    "For the main 'Total Net Worth' dashboard card, use the provided abstract wave textures via an ImageBackground to give a premium credit-card feel.",
+    "Implement the line chart for investments using react-native-chart-kit or react-native-gifted-charts with smooth curves and gradient fills.",
+    "Keep spacing generous (padding 24px/p-6, gaps 16px/gap-4) to maintain the premium, uncluttered look.",
+    "Do not use generic blue/purple colors; stick to the high-contrast monochrome + emerald/rose scheme.",
+    "Ensure all text has adequate contrast ratios.",
+    "Ensure all modules (Auth, Members, Transactions, Investments, Loans, Reports) follow this consistent clean card-based and list-based UI pattern."
+  ]
+}
