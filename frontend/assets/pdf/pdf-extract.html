@@ -61,12 +61,19 @@
     return bytes;
   }
 
-  // Point pdf.js's worker at a Blob built from the inlined worker source,
-  // so it never tries to fetch a worker script over the network.
-  var workerBlob = new Blob([document.getElementById("pdf-worker-src").textContent], {
-    type: "application/javascript",
-  });
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
+  // Point pdf.js's worker at a Blob built from the inlined worker source, so it never
+  // tries to fetch a worker script over the network. WKWebView (iOS) can throw when
+  // spawning a real Worker from a blob: URL under a file:// document origin, so this
+  // is wrapped defensively — extractPages() forces disableWorker below regardless,
+  // meaning a failure here is harmless either way.
+  try {
+    var workerBlob = new Blob([document.getElementById("pdf-worker-src").textContent], {
+      type: "application/javascript",
+    });
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(workerBlob);
+  } catch (e) {
+    // Ignored — extractPages() runs pdf.js on the main thread via disableWorker.
+  }
 
   function bandKey(y) {
     return Math.round(y / 3);
@@ -74,7 +81,11 @@
 
   async function extractPages(base64, password) {
     var data = base64ToUint8Array(base64);
-    var options = { data: data };
+    // Real Workers spawned from a blob: URL under a file:// document origin are
+    // unreliable in WKWebView (can throw or silently never resolve), which is why
+    // this hangs on iOS while working fine on web. Running pdf.js on the main
+    // thread sidesteps that entirely — this hidden WebView has nothing else to do.
+    var options = { data: data, disableWorker: true };
     if (password) options.password = password;
     var doc = await window.pdfjsLib.getDocument(options).promise;
     var pages = [];

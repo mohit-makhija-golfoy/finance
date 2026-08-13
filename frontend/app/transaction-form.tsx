@@ -58,6 +58,7 @@ export default function TransactionForm() {
   const [reviewModalVisible, setReviewModalVisible] = useState(false);
   const [parsedEntries, setParsedEntries] = useState<StatementEntry[]>([]);
   const [parsedBankName, setParsedBankName] = useState("");
+  const [importMemberId, setImportMemberId] = useState("");
   const [parsedWarnings, setParsedWarnings] = useState<string[]>([]);
   const [defaultImportTagIds, setDefaultImportTagIds] = useState<string[]>([]);
   const [entryDefaults, setEntryDefaults] = useState<Record<string, { category: string; tagIds: string[] }>>({});
@@ -156,10 +157,11 @@ export default function TransactionForm() {
     }
   };
 
-  const onStatementParsed = async (entries: StatementEntry[], meta: { bankName: string; warnings: string[] }) => {
+  const onStatementParsed = async (entries: StatementEntry[], meta: { bankName: string; warnings: string[]; memberId: string }) => {
     setParsedEntries(entries);
     setParsedBankName(meta.bankName);
     setParsedWarnings(meta.warnings);
+    setImportMemberId(meta.memberId);
 
     // Resolve (creating if needed) the default tags applied to every imported
     // entry: a fixed "Bank Statement" tag plus the bank name chosen at upload time.
@@ -199,9 +201,8 @@ export default function TransactionForm() {
   };
 
   const onConfirmImport = async (selected: StatementEntryWithChoices[]) => {
-    const defaultMemberId = members[0]?.id;
-    if (!defaultMemberId) {
-      Alert.alert("No members found", "Add a member before importing a statement.");
+    if (!importMemberId) {
+      Alert.alert("No member selected", "Pick which member this statement belongs to before importing.");
       return;
     }
 
@@ -254,7 +255,7 @@ export default function TransactionForm() {
           category: entry.category,
           date: entry.date,
           notes,
-          member_id: defaultMemberId,
+          member_id: importMemberId,
           tag_ids: entry.tagIds,
         });
         existingKeys.add(key);
@@ -425,6 +426,7 @@ export default function TransactionForm() {
       <StatementUploadModal
         visible={uploadModalVisible}
         onClose={() => setUploadModalVisible(false)}
+        members={members}
         onParsed={onStatementParsed}
       />
       <StatementReviewModal

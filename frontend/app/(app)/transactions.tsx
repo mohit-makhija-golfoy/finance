@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, 
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useTheme } from "@/src/contexts/ThemeContext";
+import { useFilters, type DateRangeKey } from "@/src/contexts/FilterContext";
 import { api } from "@/src/api/client";
 import { inr } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
@@ -11,7 +12,7 @@ import DateField from "@/src/components/DateField";
 import Checkbox from "@/src/components/Checkbox";
 import { toLocalYMD } from "@/src/utils/date";
 
-type Range = "month" | "last" | "3mo" | "custom";
+type Range = DateRangeKey;
 type SortOption = "price_asc" | "price_desc" | "date_new" | "date_old";
 
 function formatDateOnly(value?: string) {
@@ -47,6 +48,8 @@ function parseAutoReference(note?: string | null) {
 
 function rangeFor(r: Range, custom?: { start: string; end: string }): { start_date?: string; end_date?: string } {
   const today = new Date();
+  if (r === "all") return {};
+
   if (r === "custom") {
     return custom?.start && custom?.end ? { start_date: custom.start, end_date: custom.end } : {};
   }
@@ -65,6 +68,11 @@ function rangeFor(r: Range, custom?: { start: string; end: string }): { start_da
     };
   }
 
+  if (r === "year") {
+    const startDate = new Date(today.getFullYear() - 1, today.getMonth(), 1);
+    return { start_date: toLocalYMD(startDate), end_date: toLocalYMD(today) };
+  }
+
   const startDate = new Date(today.getFullYear(), today.getMonth() - 2, 1);
   return {
     start_date: toLocalYMD(startDate),
@@ -81,13 +89,9 @@ export default function Transactions() {
   const [selected, setSelected] = useState<string[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [filter, setFilter] = useState<"all" | "income" | "expense">("all");
-  const [range, setRange] = useState<Range>("month");
+  const { range, setRange, customRange, setCustomRange } = useFilters();
   const [showFilters, setShowFilters] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
-  const [customRange, setCustomRange] = useState({
-    start: toLocalYMD(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
-    end: toLocalYMD(new Date()),
-  });
   const [groupByCategory, setGroupByCategory] = useState(false);
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>("date_new");
@@ -315,13 +319,15 @@ export default function Transactions() {
         <>
           <MemberChips members={members} selected={selected} onChange={setSelected} />
 
-          <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
+          <View style={{ paddingHorizontal: 24, marginTop: 8, width: "100%", overflow: "hidden" }}>
             <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginBottom: 8 }}>DATE RANGE</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} style={{ width: "100%" }}>
               {([
+                { k: "all", l: "All time" },
+                { k: "year", l: "1 yr" },
+                { k: "3mo", l: "3 months" },
                 { k: "month", l: "This month" },
                 { k: "last", l: "Last month" },
-                { k: "3mo", l: "3 months" },
               ] as { k: Range; l: string }[]).map((r) => (
                 <TouchableOpacity
                   key={r.k}
@@ -472,10 +478,10 @@ export default function Transactions() {
             <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>Filter transactions between exact dates.</Text>
 
             <Text style={[styles.label, { color: theme.textMuted }]}>START DATE</Text>
-            <DateField value={customRange.start} onChange={(value) => setCustomRange((current) => ({ ...current, start: value }))} />
+            <DateField value={customRange.start} onChange={(value) => setCustomRange({ ...customRange, start: value })} />
 
             <Text style={[styles.label, { color: theme.textMuted }]}>END DATE</Text>
-            <DateField value={customRange.end} onChange={(value) => setCustomRange((current) => ({ ...current, end: value }))} />
+            <DateField value={customRange.end} onChange={(value) => setCustomRange({ ...customRange, end: value })} />
 
             <TouchableOpacity testID="apply-custom-transaction-range" onPress={() => setShowCustom(false)} style={[styles.applyBtn, { backgroundColor: theme.primary }]}> 
               <Text style={{ color: theme.primaryText, fontWeight: "700" }}>Apply</Text>

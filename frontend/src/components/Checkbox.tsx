@@ -21,12 +21,12 @@ export default function Checkbox({ value, onChange, label, testID }: Props) {
       <View style={[styles.box, { borderColor: theme.border, backgroundColor: value ? theme.primary : "transparent" }]}>
         {value && <Text style={{ color: theme.primaryText, fontSize: 14, fontWeight: "900", lineHeight: 16 }}>✓</Text>}
       </View>
-      <Text style={{ color: theme.text, fontSize: 14, flex: 1 }}>{label}</Text>
+      {!!label && <Text style={{ color: theme.text, fontSize: 14, flex: 1 }}>{label}</Text>}
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6, flexGrow: 0, flexShrink: 0 },
   box: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, alignItems: "center", justifyContent: "center" },
 });

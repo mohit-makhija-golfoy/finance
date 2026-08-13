@@ -4,6 +4,7 @@ import { Asset } from "expo-asset";
 import { PdfPasswordRequiredError, type PdfExtractionResult, type PdfExtractorHandle } from "./types";
 
 const EXTRACTION_TIMEOUT_MS = 30000;
+const READY_TIMEOUT_MS = 15000;
 
 type PendingRequest = {
   resolve: (result: PdfExtractionResult) => void;
@@ -36,12 +37,20 @@ const PdfExtractor = forwardRef<PdfExtractorHandle>((_props, ref) => {
   }, []);
 
   const waitUntilReady = () =>
-    new Promise<void>((resolve) => {
+    new Promise<void>((resolve, reject) => {
       if (readyRef.current) {
         resolve();
         return;
       }
-      readyWaitersRef.current.push(resolve);
+      const timeoutId = setTimeout(() => {
+        readyWaitersRef.current = readyWaitersRef.current.filter((w) => w !== onReady);
+        reject(new Error("Couldn't start the PDF reader — try again."));
+      }, READY_TIMEOUT_MS);
+      const onReady = () => {
+        clearTimeout(timeoutId);
+        resolve();
+      };
+      readyWaitersRef.current.push(onReady);
     });
 
   useImperativeHandle(ref, () => ({

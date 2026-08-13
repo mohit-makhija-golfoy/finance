@@ -4,6 +4,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { useFilters, type DateRangeKey } from "@/src/contexts/FilterContext";
 import { api } from "@/src/api/client";
 import { inr, inrFull } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
@@ -14,18 +15,23 @@ import { toLocalYMD } from "@/src/utils/date";
 const BG_DARK = "https://images.pexels.com/photos/29041985/pexels-photo-29041985.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 const BG_LIGHT = "https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGxpZ2h0JTIwd2F2ZXMlMjB0ZXh0dXJlfGVufDB8fHx8MTc4MDY0NDMxOXww&ixlib=rb-4.1.0&q=85";
 
-type Range = "all" | "month" | "3mo" | "year" | "custom";
+type Range = DateRangeKey;
 
 function monthStart(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function monthEnd(d: Date) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
 function ymd(d: Date) { return toLocalYMD(d); }
+function parseYMD(s: string) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
 function monthKey(d: Date) { return toLocalYMD(d).slice(0, 7); }
 
-function rangeFor(r: Range, custom?: { from: Date; to: Date }): { start_date?: string; end_date?: string } {
+function rangeFor(r: Range, custom?: { start: string; end: string }): { start_date?: string; end_date?: string } {
   const today = new Date();
   if (r === "all") return {};
-  if (r === "custom" && custom) {
-    return { start_date: ymd(monthStart(custom.from)), end_date: ymd(monthEnd(custom.to)) };
+  if (r === "custom" && custom?.start && custom?.end) {
+    return { start_date: ymd(monthStart(parseYMD(custom.start))), end_date: ymd(monthEnd(parseYMD(custom.end))) };
+  }
+  if (r === "last") {
+    const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    return { start_date: ymd(start), end_date: ymd(monthEnd(start)) };
   }
   let start: Date;
   const end = monthEnd(today);
@@ -44,8 +50,7 @@ export default function Dashboard() {
   const [members, setMembers] = useState<any[]>([]);
   const [reminders, setReminders] = useState<any[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [range, setRange] = useState<Range>("month");
-  const [custom, setCustom] = useState<{ from: Date; to: Date }>({ from: monthStart(new Date(new Date().getFullYear(), new Date().getMonth() - 2, 1)), to: monthEnd(new Date()) });
+  const { range, setRange, customRange: custom, setCustomRange: setCustom } = useFilters();
   const [showCustom, setShowCustom] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -136,24 +141,25 @@ export default function Dashboard() {
         {showFilters && (
           <View style={styles.filterPanel}>
             {/* Range pills */}
-            <View style={{ height: 48 }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rangeRow}>
+            <View style={{ height: 48, width: "100%", overflow: "hidden" }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rangeRow} style={{ width: "100%" }}>
                 {([
                   { k: "all", l: "All time" },
                   { k: "year", l: "1 yr" },
                   { k: "3mo", l: "3 mo" },
                   { k: "month", l: "This month" },
+                  { k: "last", l: "Last month" },
                 ] as { k: Range; l: string }[]).map((r) => (
                   <TouchableOpacity key={r.k} testID={`range-${r.k}`} onPress={() => setRange(r.k)}
-                    style={[styles.rangeChip, { backgroundColor: range === r.k ? theme.primary : theme.surface, borderColor: range === r.k ? theme.primary : theme.border }]}> 
+                    style={[styles.rangeChip, { backgroundColor: range === r.k ? theme.primary : theme.surface, borderColor: range === r.k ? theme.primary : theme.border }]}>
                     <Text style={{ color: range === r.k ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{r.l}</Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity testID="range-custom" onPress={() => { setRange("custom"); setShowCustom(true); }}
-                  style={[styles.rangeChip, { backgroundColor: range === "custom" ? theme.primary : theme.surface, borderColor: range === "custom" ? theme.primary : theme.border, flexDirection: "row", gap: 4 }]}> 
+                  style={[styles.rangeChip, { backgroundColor: range === "custom" ? theme.primary : theme.surface, borderColor: range === "custom" ? theme.primary : theme.border, flexDirection: "row", gap: 4 }]}>
                   <Ionicons name="calendar-outline" size={14} color={range === "custom" ? theme.primaryText : theme.textMuted} />
                   <Text style={{ color: range === "custom" ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>
-                    {range === "custom" ? `${monthKey(custom.from)} → ${monthKey(custom.to)}` : "Custom"}
+                    {range === "custom" ? `${monthKey(parseYMD(custom.start))} → ${monthKey(parseYMD(custom.end))}` : "Custom"}
                   </Text>
                 </TouchableOpacity>
               </ScrollView>
@@ -279,7 +285,12 @@ export default function Dashboard() {
         {loading && !data && <ActivityIndicator color={theme.text} style={{ marginTop: 40 }} />}
       </ScrollView>
 
-      <CustomRangeModal visible={showCustom} onClose={() => setShowCustom(false)} value={custom} onChange={(v) => { setCustom(v); setRange("custom"); }} />
+      <CustomRangeModal
+        visible={showCustom}
+        onClose={() => setShowCustom(false)}
+        value={{ from: parseYMD(custom.start), to: parseYMD(custom.end) }}
+        onChange={(v: { from: Date; to: Date }) => { setCustom({ start: ymd(v.from), end: ymd(v.to) }); setRange("custom"); }}
+      />
       <DrilldownModal visible={!!drilldown} data={drilldown} onClose={() => setDrilldown(null)} />
       {showFilters && (
         <TouchableOpacity

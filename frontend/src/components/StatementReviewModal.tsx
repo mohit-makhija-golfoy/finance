@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, ScrollView } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, Modal, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import Checkbox from "@/src/components/Checkbox";
@@ -45,6 +46,7 @@ export default function StatementReviewModal({
   submitting,
 }: Props) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [entryCategory, setEntryCategory] = useState<Record<string, string>>({});
   const [entryTagIds, setEntryTagIds] = useState<Record<string, string[]>>({});
@@ -57,7 +59,7 @@ export default function StatementReviewModal({
   const [applyKeyword, setApplyKeyword] = useState("");
   const [applyingRule, setApplyingRule] = useState(false);
   const [hasEdited, setHasEdited] = useState(false);
-  const [groupByCategory, setGroupByCategory] = useState(false);
+  const [groupByCategory, setGroupByCategory] = useState(true);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -75,6 +77,7 @@ export default function StatementReviewModal({
       setEntryCategory(nextCategory);
       setEntryTagIds(nextTagIds);
       setEditingEntryId(null);
+      setGroupByCategory(true);
     }
   }, [visible, entries, defaultCategory, defaultTagIds, entryDefaults]);
 
@@ -91,6 +94,25 @@ export default function StatementReviewModal({
 
   const selectedCount = Object.values(checked).filter(Boolean).length;
   const toggle = (id: string) => setChecked((c) => ({ ...c, [id]: !c[id] }));
+  const toggleGroup = (groupEntries: StatementEntry[], nextValue: boolean) =>
+    setChecked((c) => {
+      const next = { ...c };
+      for (const e of groupEntries) next[e.id] = nextValue;
+      return next;
+    });
+
+  const sumByDirection = (list: StatementEntry[]) =>
+    list.reduce(
+      (totals, e) => {
+        if (e.direction === "credit") totals.credit += e.amount;
+        else totals.debit += e.amount;
+        return totals;
+      },
+      { credit: 0, debit: 0 }
+    );
+
+  const totalAmounts = useMemo(() => sumByDirection(entries), [entries]);
+  const selectedAmounts = useMemo(() => sumByDirection(entries.filter((e) => checked[e.id])), [entries, checked]);
 
   const setCategoryFor = (id: string, name: string) => {
     setHasEdited(true);
@@ -260,9 +282,13 @@ export default function StatementReviewModal({
 
   return (
     <Modal transparent={false} visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.container, { backgroundColor: theme.background }]}>
-        <View style={styles.topBar}>
-          <TouchableOpacity testID="statement-review-close" onPress={onClose}>
+      <SafeAreaView edges={["bottom"]} style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={[styles.topBar, { paddingTop: insets.top + 20 }]}>
+          <TouchableOpacity
+            testID="statement-review-close"
+            onPress={onClose}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+          >
             <Ionicons name="close" size={24} color={theme.text} />
           </TouchableOpacity>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Review Entries</Text>
@@ -271,7 +297,14 @@ export default function StatementReviewModal({
 
         <Text style={{ color: theme.textMuted, paddingHorizontal: 24, fontSize: 13 }}>
           {bankName ? `${bankName} • ` : ""}
-          {entries.length} entr{entries.length === 1 ? "y" : "ies"} found. Uncheck any you don't want to import, tap one to edit its category/tags.
+          {entries.length} entr{entries.length === 1 ? "y" : "ies"} found
+          {totalAmounts.credit > 0 && (
+            <Text style={{ color: theme.positive }}> • +{inr(totalAmounts.credit)}</Text>
+          )}
+          {totalAmounts.debit > 0 && (
+            <Text style={{ color: theme.negative }}> • -{inr(totalAmounts.debit)}</Text>
+          )}
+          . Uncheck any you don't want to import, tap one to edit its category/tags.
         </Text>
 
         <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
@@ -296,6 +329,7 @@ export default function StatementReviewModal({
             groupedEntries.map((group) => {
               const isUngrouped = group.category === defaultCategory;
               const expanded = isGroupExpanded(collapsedGroups, group.category);
+              const allChecked = group.entries.every((e) => checked[e.id]);
               return (
                 <View key={group.category} style={{ marginBottom: 10 }}>
                   <TouchableOpacity
@@ -304,12 +338,21 @@ export default function StatementReviewModal({
                     activeOpacity={0.7}
                     style={[styles.groupHeader, { backgroundColor: theme.surface, borderColor: isUngrouped ? theme.negative : theme.border }]}
                   >
-                    <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={16} color={theme.textMuted} />
+                    <Checkbox
+                      testID={`statement-group-select-${group.category}`}
+                      value={allChecked}
+                      onChange={(v) => toggleGroup(group.entries, v)}
+                      label=""
+                    />
+                    <Ionicons name={expanded ? "chevron-down" : "chevron-forward"} size={16} color={theme.textMuted} style={{ marginLeft: 4 }} />
                     <Text style={{ color: isUngrouped ? theme.negative : theme.text, fontSize: 14, fontWeight: "700", flex: 1, marginLeft: 8 }}>
                       {isUngrouped ? "Ungrouped — needs category/tags" : group.category}
                     </Text>
                     <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "600" }}>
-                      {group.entries.length}
+                      {group.entries.length} entr{group.entries.length === 1 ? "y" : "ies"} •{" "}
+                      <Text style={{ color: sumByDirection(group.entries).credit >= sumByDirection(group.entries).debit ? theme.positive : theme.negative }}>
+                        {inr(sumByDirection(group.entries).credit - sumByDirection(group.entries).debit)}
+                      </Text>
                     </Text>
                   </TouchableOpacity>
                   {expanded && <View style={{ marginTop: 8 }}>{group.entries.map((entry) => renderEntryRow(entry))}</View>}
@@ -324,6 +367,12 @@ export default function StatementReviewModal({
         <View style={[styles.footer, { backgroundColor: theme.background, borderTopColor: theme.border }]}>
           <Text style={{ color: theme.textMuted, fontSize: 13, marginBottom: 10 }}>
             {selectedCount} of {entries.length} selected
+            {selectedAmounts.credit > 0 && (
+              <Text style={{ color: theme.positive }}> • +{inr(selectedAmounts.credit)}</Text>
+            )}
+            {selectedAmounts.debit > 0 && (
+              <Text style={{ color: theme.negative }}> • -{inr(selectedAmounts.debit)}</Text>
+            )}
           </Text>
           <TouchableOpacity
             testID="statement-review-submit"
@@ -336,10 +385,19 @@ export default function StatementReviewModal({
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </SafeAreaView>
 
       <Modal transparent visible={!!editingEntry} animationType="slide" onRequestClose={() => setEditingEntryId(null)}>
-        <TouchableOpacity activeOpacity={1} onPress={() => setEditingEntryId(null)} style={styles.backdrop}>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setEditingEntryId(null)}
+          style={
+            Platform.OS === "web"
+              ? styles.backdrop
+              : [styles.backdrop, { position: "absolute", top: -insets.top, left: 0, right: 0, bottom: 0 }]
+          }
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%" }}>
           <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Edit entry</Text>
             {editingEntry && (
@@ -451,6 +509,7 @@ export default function StatementReviewModal({
               <Text style={{ color: theme.primaryText, fontWeight: "700" }}>{applyingRule ? "Applying..." : "Done"}</Text>
             </TouchableOpacity>
           </TouchableOpacity>
+          </KeyboardAvoidingView>
         </TouchableOpacity>
       </Modal>
     </Modal>
