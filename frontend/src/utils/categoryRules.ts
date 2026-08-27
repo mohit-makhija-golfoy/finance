@@ -9,7 +9,7 @@ export type CategoryRuleLike = {
 // ever be guessed as "the merchant" — transaction-type markers, rail names,
 // and common bank name fragments. Best-effort, not exhaustive.
 const NOISE_WORDS = new Set([
-  "upi", "dr", "cr", "ref", "txn", "neft", "imps", "rtgs", "bank", "the",
+  "dr", "cr", "ref", "txn", "neft", "imps", "rtgs", "bank", "the",
   "hdfc", "icici", "sbi", "axis", "kotak", "pnb", "yesb", "yes", "indusind",
   "idbi", "federal", "baroda", "canara", "union", "idfc", "first",
 ]);
@@ -33,6 +33,33 @@ export function guessKeyword(notes: string): string {
 
   const longest = words.reduce((best, w) => (w.length > best.length ? w : best), words[0]);
   return longest.charAt(0).toUpperCase() + longest.slice(1).toLowerCase();
+}
+
+/**
+ * Every distinct merchant/rail keyword found in a transaction's notes (not
+ * just the single longest one guessKeyword() picks) — used to build "auto
+ * arrange" suggestions that group ungrouped statement entries by whichever
+ * common tokens they share (e.g. "Paytm", "Zomato", "Payment").
+ */
+export function extractKeywords(notes: string): string[] {
+  const raw = notes || "";
+  const sepIndex = raw.indexOf(" • ");
+  const withoutBankPrefix = sepIndex >= 0 ? raw.slice(sepIndex + 3) : raw;
+
+  const words = withoutBankPrefix
+    .split(/[^a-zA-Z]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length > 2 && !NOISE_WORDS.has(w.toLowerCase()));
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const w of words) {
+    const lower = w.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    result.push(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  }
+  return result;
 }
 
 /**

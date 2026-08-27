@@ -57,7 +57,7 @@ export default function StatementUploadModal({ visible, onClose, members, onPars
   useEffect(() => {
     if (visible) {
       setFileName(null);
-      setMemberId("");
+      setMemberId(members[0]?.id || "");
       setBankName("");
       setRangeMode("all");
       setIncludeCredit(true);
