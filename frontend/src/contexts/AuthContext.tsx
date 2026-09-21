@@ -8,8 +8,8 @@ type User = { id: string; email: string; full_name?: string | null };
 type AuthCtx = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, fullName?: string) => Promise<void>;
+  login: (email: string) => Promise<void>;
+  register: (email: string, fullName?: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshSession: () => Promise<void>;
 };
@@ -64,15 +64,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.post("/auth/login", { email, password });
+  const login = async (email: string) => {
+    const res = await api.post("/auth/login", { email });
     await storage.secureSet(TOKEN_KEY, res.access_token);
     await storage.secureSet(CURRENT_USER_KEY, JSON.stringify(res.user));
     setUser(res.user);
   };
 
-  const register = async (email: string, password: string, fullName?: string) => {
-    const res = await api.post("/auth/register", { email, password, full_name: fullName });
+  const register = async (email: string, fullName?: string) => {
+    const res = await api.post("/auth/register", { email, full_name: fullName });
     await storage.secureSet(TOKEN_KEY, res.access_token);
     await storage.secureSet(CURRENT_USER_KEY, JSON.stringify(res.user));
     setUser(res.user);

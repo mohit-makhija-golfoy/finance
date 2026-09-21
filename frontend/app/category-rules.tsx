@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert, Modal } from "react-native";
 import { useRouter, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { api } from "@/src/api/client";
 import Screen from "@/src/components/Screen";
@@ -18,6 +19,7 @@ const BLANK_EDIT: EditState = { id: null, keyword: "", category: "", type: "expe
 
 export default function CategoryRules() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [rules, setRules] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -146,7 +148,7 @@ export default function CategoryRules() {
       <Modal transparent visible={!!edit} animationType="slide" onRequestClose={() => setEdit(null)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
           <TouchableOpacity activeOpacity={1} onPress={() => setEdit(null)} style={styles.backdrop}>
-            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
               <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>{edit?.id ? "Edit rule" : "New rule"}</Text>
 
               <ScrollView keyboardShouldPersistTaps="handled" style={{ marginTop: 12 }}>

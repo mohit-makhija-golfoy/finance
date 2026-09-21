@@ -9,7 +9,6 @@ type User = {
   id: string;
   email: string;
   full_name?: string | null;
-  hashed_password: string;
   created_at: string;
 };
 
@@ -27,6 +26,7 @@ type Category = {
   user_id: string;
   name: string;
   type: TxType;
+  icon?: string | null;
   created_at: string;
 };
 
@@ -75,6 +75,9 @@ type Investment = {
   expected_return_type?: "percent" | "amount" | null;
   status: "active" | "closed";
   notes?: string | null;
+  matured_date?: string | null;
+  matured_amount?: number | null;
+  matured_income_tx_id?: string | null;
   created_at: string;
 };
 
@@ -240,7 +243,7 @@ export async function initializeDatabase() {
   await loadDb();
 }
 
-export async function createUser(email: string, hashedPassword: string, fullName?: string) {
+export async function createUser(email: string, fullName?: string) {
   const state = await loadDb();
   const existing = state.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
   if (existing) throw new Error("Email already registered");
@@ -250,7 +253,6 @@ export async function createUser(email: string, hashedPassword: string, fullName
     id: userId,
     email: email.toLowerCase(),
     full_name: fullName || null,
-    hashed_password: hashedPassword,
     created_at: nowIso(),
   };
 
@@ -297,18 +299,9 @@ export async function getAllUsersForDebug() {
       id: u.id,
       email: u.email,
       full_name: u.full_name || null,
-      password_hash: u.hashed_password,
       created_at: u.created_at,
     }))
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
-}
-
-export async function updateUserPassword(userId: string, hashedPassword: string) {
-  await mutateDb(async (s) => {
-    const user = s.users.find((u) => u.id === userId);
-    if (!user) throw new Error("User not found");
-    user.hashed_password = hashedPassword;
-  });
 }
 
 export async function deleteUserAccount(userId: string) {
@@ -645,7 +638,7 @@ export async function deleteMember(memberId: string, userId: string) {
   });
 }
 
-export async function createCategory(userId: string, name: string, type: TxType) {
+export async function createCategory(userId: string, name: string, type: TxType, icon?: string | null) {
   const state = await loadDb();
   const exists = state.categories.find(
     (c) => c.user_id === userId && c.type === type && c.name.toLowerCase() === name.toLowerCase()
@@ -658,6 +651,7 @@ export async function createCategory(userId: string, name: string, type: TxType)
     user_id: userId,
     name,
     type,
+    icon: icon || null,
     created_at: nowIso(),
   };
   await mutateDb(async (s) => {
@@ -673,12 +667,13 @@ export async function getCategories(userId: string) {
     .sort((a, b) => `${a.type}-${a.name}`.localeCompare(`${b.type}-${b.name}`));
 }
 
-export async function updateCategory(categoryId: string, userId: string, name: string, type: TxType) {
+export async function updateCategory(categoryId: string, userId: string, name: string, type: TxType, icon?: string | null) {
   await mutateDb(async (s) => {
     const c = s.categories.find((x) => x.id === categoryId && x.user_id === userId);
     if (!c) return;
     c.name = name;
     c.type = type;
+    if (icon !== undefined) c.icon = icon;
   });
 }
 
@@ -856,6 +851,7 @@ export async function getTransactions(
     memberIds?: string[];
     type?: TxType;
     category?: string;
+    categories?: string[];
     startDate?: string;
     endDate?: string;
     tagIds?: string[];
@@ -867,6 +863,7 @@ export async function getTransactions(
     .filter((t) => (options?.memberIds?.length ? options.memberIds.includes(t.member_id) : true))
     .filter((t) => (options?.type ? t.type === options.type : true))
     .filter((t) => (options?.category ? t.category === options.category : true))
+    .filter((t) => (options?.categories?.length ? options.categories.includes(t.category) : true))
     .filter((t) => (options?.startDate ? t.date >= options.startDate : true))
     .filter((t) => (options?.endDate ? t.date <= options.endDate : true))
     .filter((t) => (options?.tagIds?.length ? (t.tag_ids || []).some((id) => options.tagIds!.includes(id)) : true))
@@ -959,6 +956,9 @@ async function enrichInvestment(inv: Investment) {
       currentValue = history[history.length - 1].current_value;
     } else {
       // Backward-compatibility for older withdrawals recorded before current_value updates were added.
+      // Note: current_value intentionally stays at principal (not the projected
+      // maturity amount) until a real value update is recorded — net worth must
+      // reflect money actually held today, not unrealized future interest.
       const baseCurrent = inv.current_value ?? inv.amount ?? 0;
       currentValue = Math.max(0, baseCurrent - totalWithdrawn);
     }
@@ -1174,6 +1174,47 @@ export async function addInvestmentWithdrawal(
       });
     }
   });
+}
+
+export async function matureInvestment(investmentId: string, userId: string, amount: number, date: string) {
+  let result: { tx_id: string } | null = null;
+  await mutateDb(async (s) => {
+    const inv = s.investments.find((i) => i.id === investmentId && i.user_id === userId);
+    if (!inv) return;
+
+    const maturityAmount = Number(amount) || 0;
+    const txId = generateId();
+    s.transactions.push({
+      id: txId,
+      user_id: userId,
+      type: "income",
+      amount: maturityAmount,
+      category: "FD Maturity",
+      date,
+      notes: `${inv.name} matured [AUTO_MATURITY:${inv.id}]`,
+      member_id: inv.member_id,
+      tag_ids: [],
+      created_at: nowIso(),
+    });
+
+    s.investment_value_history.push({
+      id: generateId(),
+      investment_id: investmentId,
+      date,
+      current_value: maturityAmount,
+      created_at: nowIso(),
+    });
+
+    inv.current_value = maturityAmount;
+    inv.status = "closed";
+    inv.end_date = date;
+    inv.matured_date = date;
+    inv.matured_amount = maturityAmount;
+    inv.matured_income_tx_id = txId;
+
+    result = { tx_id: txId };
+  });
+  return result;
 }
 
 async function enrichLoan(loan: Loan) {

@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, useWindowDimensions, Modal } from "react-native";
 import { useRouter, useFocusEffect, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Rect, Text as SvgText } from "react-native-svg";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { api } from "@/src/api/client";
@@ -29,6 +30,7 @@ function rangeFor(r: Range, custom?: { start: string; end: string }): { start_da
 
 export default function Reports() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [range, setRange] = useState<Range>("3mo");
@@ -73,7 +75,7 @@ export default function Reports() {
         <View style={{ paddingHorizontal: 24 }}>
           <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginBottom: 8 }}>RANGE</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-            {([{k:"month",l:"This month"},{k:"3mo",l:"3 mo"},{k:"year",l:"1 yr"},{k:"all",l:"All time"}] as {k:Range,l:string}[]).map((r) => (
+            {([{k:"month",l:"This month"},{k:"3mo",l:"3 months"},{k:"year",l:"1 yr"},{k:"all",l:"All time"}] as {k:Range,l:string}[]).map((r) => (
               <TouchableOpacity key={r.k} testID={`reports-range-${r.k}`} onPress={() => setRange(r.k)}
                 style={[styles.chip, { backgroundColor: range === r.k ? theme.primary : theme.surface, borderColor: range === r.k ? theme.primary : theme.border }]}>
                 <Text style={{ color: range === r.k ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{r.l}</Text>
@@ -132,7 +134,7 @@ export default function Reports() {
 
       <Modal transparent visible={showCustom} animationType="slide" onRequestClose={() => setShowCustom(false)}>
         <TouchableOpacity activeOpacity={1} onPress={() => setShowCustom(false)} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Custom Date Range</Text>
             <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>Pick exact start and end dates for the report.</Text>
 

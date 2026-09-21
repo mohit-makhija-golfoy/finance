@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, useWindowDimensions, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, useWindowDimensions, KeyboardAvoidingView, Platform, Modal } from "react-native";
 import { useLocalSearchParams, useRouter, useFocusEffect, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
@@ -7,9 +7,11 @@ import { api } from "@/src/api/client";
 import { inrFull, inr } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
 import MiniLineChart from "@/src/components/MiniLineChart";
+import PieChart from "@/src/components/PieChart";
 import Checkbox from "@/src/components/Checkbox";
 import DateField from "@/src/components/DateField";
-import { toLocalYMD } from "@/src/utils/date";
+import { toLocalYMD, formatLongDate, formatDateTime } from "@/src/utils/date";
+import { projectedMaturity } from "@/src/utils/investment";
 
 export default function InvestmentDetail() {
   const { theme } = useTheme();
@@ -22,6 +24,10 @@ export default function InvestmentDetail() {
   const [withdrawAmt, setWithdrawAmt] = useState("");
   const [withdrawDate, setWithdrawDate] = useState(toLocalYMD(new Date()));
   const [addToIncome, setAddToIncome] = useState(true);
+  const [showMature, setShowMature] = useState(false);
+  const [matureAmount, setMatureAmount] = useState("");
+  const [matureDate, setMatureDate] = useState(toLocalYMD(new Date()));
+  const [maturing, setMaturing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -64,6 +70,27 @@ export default function InvestmentDetail() {
       load();
     } catch (error) {
       Alert.alert("Withdrawal failed", error instanceof Error ? error.message : "Failed to withdraw");
+    }
+  };
+
+  const openMature = () => {
+    setMatureAmount(String(Math.round(projectedMaturity(inv).maturityValue)));
+    setMatureDate(inv.maturity_date && inv.maturity_date <= toLocalYMD(new Date()) ? inv.maturity_date : toLocalYMD(new Date()));
+    setShowMature(true);
+  };
+
+  const confirmMature = async () => {
+    if (!matureAmount) return;
+    setMaturing(true);
+    try {
+      await api.post(`/investments/${id}/mature`, { amount: parseFloat(matureAmount) || 0, date: matureDate });
+      setShowMature(false);
+      await load();
+      Alert.alert("Matured", "This investment has matured and the amount was added to income.");
+    } catch (error) {
+      Alert.alert("Failed", error instanceof Error ? error.message : "Failed to mature investment");
+    } finally {
+      setMaturing(false);
     }
   };
 
@@ -112,9 +139,10 @@ export default function InvestmentDetail() {
     ]);
   };
 
-  const expectedDisplay = inv.expected_return
-    ? inv.expected_return_type === "amount" ? inrFull(inv.expected_return) : `${inv.expected_return}%`
-    : "—";
+  const { invested, annualRatePercent, totalInterest, maturityValue, hasReturn, maturityD } = projectedMaturity(inv);
+  const isMatured = inv.status === "closed" && !!inv.matured_date;
+  const maturityReached = !!inv.maturity_date && inv.maturity_date <= toLocalYMD(new Date());
+  const canMature = inv.type === "onetime" && inv.status === "active" && maturityReached;
 
   return (
     <Screen>
@@ -133,22 +161,61 @@ export default function InvestmentDetail() {
           </View>
 
           <View style={{ padding: 24 }}>
-            <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>{inv.type?.toUpperCase()} • {inv.status?.toUpperCase()}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>{inv.type?.toUpperCase()} • {inv.status?.toUpperCase()}</Text>
+              {isMatured && (
+                <View style={[styles.tag, { backgroundColor: theme.positive + "22", borderColor: theme.positive }]}>
+                  <Text style={{ color: theme.positive, fontSize: 10, fontWeight: "700", letterSpacing: 0.5 }}>MATURED</Text>
+                </View>
+              )}
+            </View>
             <Text style={{ color: theme.text, fontSize: 30, fontWeight: "700", letterSpacing: -0.5, marginTop: 6 }}>{inv.name}</Text>
             <Text style={{ color: theme.text, fontSize: 32, fontWeight: "700", marginTop: 20 }}>{inrFull(inv.current_value || 0)}</Text>
-            <Text style={{ color: pl >= 0 ? theme.positive : theme.negative, fontWeight: "700", marginTop: 4 }}>{pl >= 0 ? "+" : ""}{inr(pl)} P/L</Text>
+            {pl !== 0 && (
+              <Text style={{ color: pl >= 0 ? theme.positive : theme.negative, fontWeight: "700", marginTop: 4 }}>{pl >= 0 ? "+" : ""}{inr(pl)} P/L</Text>
+            )}
+            {isMatured ? (
+              <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 6 }}>
+                This value was matured on {formatLongDate(inv.matured_date)} with {inrFull(inv.matured_amount || 0)} and added to income.
+              </Text>
+            ) : hasReturn && (
+              <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 6 }}>
+                On maturity{inv.maturity_date ? ` (${formatLongDate(inv.maturity_date)})` : ""}: <Text style={{ color: theme.text, fontWeight: "700" }}>{inrFull(maturityValue)}</Text>
+                {" "}(<Text style={{ color: theme.positive, fontWeight: "700" }}>+{inr(totalInterest)} P/L</Text>)
+              </Text>
+            )}
 
-            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>VALUE OVER TIME</Text>
-              <View style={{ marginTop: 12 }}>
-                {chartData.length > 0 ? <MiniLineChart data={chartData} width={width - 96} height={150} showAxis /> : <Text style={{ color: theme.textMuted, marginTop: 12 }}>No history yet. Add a value update.</Text>}
-              </View>
-            </View>
+            {canMature && (
+              <TouchableOpacity testID="mature-inv-btn" onPress={openMature} style={[styles.btnFull, { backgroundColor: theme.primary, borderColor: theme.primary, marginTop: 16 }]}>
+                <Text style={{ color: theme.primaryText, fontWeight: "700" }}>Mature this investment</Text>
+              </TouchableOpacity>
+            )}
 
+            {inv.type === "recurring" && <Row label="Monthly Amount" value={inr(inv.amount || 0)} />}
             <Row label="Invested" value={inr(inv.total_invested || 0)} />
-            <Row label="Start" value={inv.start_date} />
-            {inv.maturity_date && <Row label="Maturity" value={inv.maturity_date} />}
-            <Row label="Expected Return" value={expectedDisplay} />
+            <Row label="Start" value={formatLongDate(inv.start_date)} />
+            {inv.maturity_date && <Row label="Maturity" value={formatLongDate(inv.maturity_date)} />}
+
+            {hasReturn && (
+              <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>
+                  EXPECTED RETURN{!maturityD ? " (ANNUAL)" : ""}
+                </Text>
+                <PieChart
+                  data={[
+                    { label: "Invested", value: invested, color: theme.textMuted },
+                    { label: "Interest", value: totalInterest, color: theme.positive },
+                  ]}
+                  centerLabel="TOTAL"
+                  centerValue={inrFull(maturityValue)}
+                />
+                <View style={{ marginTop: 4 }}>
+                  <Row label="Interest Rate" value={`${annualRatePercent.toFixed(2)}% p.a.`} />
+                  <Row label="Total Interest" value={inr(totalInterest)} />
+                  <Row label="Total Amount Receivable" value={inr(maturityValue)} />
+                </View>
+              </View>
+            )}
 
             {inv.type !== "onetime" && (
               <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -164,7 +231,7 @@ export default function InvestmentDetail() {
               </View>
             )}
 
-            {inv.type === "onetime" && inv.status === "active" && (
+            {inv.type === "onetime" && inv.status === "active" && !maturityReached && (
               <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
                 <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>PARTIAL WITHDRAWAL</Text>
                 <View style={{ marginTop: 12 }}>
@@ -186,7 +253,8 @@ export default function InvestmentDetail() {
                 {withdrawals.map((w: any) => (
                   <View key={w.id} testID={`wd-row-${w.id}`} style={[styles.payRow, { borderBottomColor: theme.border }]}>
                     <View>
-                      <Text style={{ color: theme.text, fontWeight: "600" }}>{formatDateTime(w.date, w.created_at)}</Text>
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{formatLongDate(w.date)}</Text>
+                      {w.created_at && <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>Recorded {formatDateTime(w.created_at)}</Text>}
                       {w.income_tx_id && <Text style={{ color: theme.positive, fontSize: 11, marginTop: 2 }}>↳ added to income</Text>}
                     </View>
                     <Text style={{ color: theme.text, fontWeight: "700" }}>{inr(w.amount)}</Text>
@@ -201,12 +269,22 @@ export default function InvestmentDetail() {
                 <Text style={{ color: theme.textMuted }}>No value updates yet.</Text>
               ) : (
                 history.slice().reverse().map((h: any, index: number) => (
-                  <View key={`${h.id || h.date}-${index}`} testID={`vh-row-${h.id || index}`} style={[styles.payRow, { borderBottomColor: theme.border }]}> 
-                    <Text style={{ color: theme.text, fontWeight: "600" }}>{formatDateTime(h.date, h.created_at)}</Text>
+                  <View key={`${h.id || h.date}-${index}`} testID={`vh-row-${h.id || index}`} style={[styles.payRow, { borderBottomColor: theme.border }]}>
+                    <View>
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{formatLongDate(h.date)}</Text>
+                      {h.created_at && <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>Recorded {formatDateTime(h.created_at)}</Text>}
+                    </View>
                     <Text style={{ color: theme.text, fontWeight: "700" }}>{inr(h.current_value || 0)}</Text>
                   </View>
                 ))
               )}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>VALUE OVER TIME</Text>
+              <View style={{ marginTop: 12 }}>
+                {chartData.length > 0 ? <MiniLineChart data={chartData} width={width - 96} height={150} showAxis /> : <Text style={{ color: theme.textMuted, marginTop: 12 }}>No history yet. Add a value update.</Text>}
+              </View>
             </View>
 
             {inv.status === "active" && (
@@ -221,6 +299,45 @@ export default function InvestmentDetail() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal transparent visible={showMature} animationType="fade" onRequestClose={() => setShowMature(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowMature(false)} style={styles.modalBackdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Mature this investment</Text>
+            <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 6 }}>
+              This will add the maturity amount to your income and mark "{inv.name}" as closed.
+            </Text>
+
+            <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginTop: 20, marginBottom: 8 }}>MATURITY AMOUNT</Text>
+            <TextInput
+              testID="mature-amount-input"
+              keyboardType="decimal-pad"
+              value={matureAmount}
+              onChangeText={setMatureAmount}
+              placeholder="0"
+              placeholderTextColor={theme.textMuted}
+              style={inputStyle(theme)}
+            />
+
+            <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginTop: 16, marginBottom: 8 }}>DATE</Text>
+            <DateField testID="mature-date-input" value={matureDate} onChange={setMatureDate} />
+
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
+              <TouchableOpacity onPress={() => setShowMature(false)} style={[styles.btn, { flex: 1, borderWidth: 1, borderColor: theme.border, alignItems: "center", paddingVertical: 14 }]}>
+                <Text style={{ color: theme.text, fontWeight: "700" }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="confirm-mature-btn"
+                disabled={maturing}
+                onPress={confirmMature}
+                style={[styles.btn, { flex: 1, backgroundColor: theme.primary, alignItems: "center", paddingVertical: 14, opacity: maturing ? 0.6 : 1 }]}
+              >
+                <Text style={{ color: theme.primaryText, fontWeight: "700" }}>{maturing ? "Approving…" : "Approve"}</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </Screen>
   );
 }
@@ -237,20 +354,6 @@ function getSortTime(item: any) {
   return Number.isNaN(dateOnly) ? 0 : dateOnly;
 }
 
-function formatDateTime(date?: string, createdAt?: string) {
-  const raw = createdAt || (date ? `${date}T00:00:00` : "");
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return date || "-";
-  return d.toLocaleString("en-US", {
-    month: "long",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
 const inputStyle = (theme: any) => ({ borderWidth: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: theme.text, borderColor: theme.border, backgroundColor: theme.surface, minHeight: 52 });
 const styles = StyleSheet.create({
   topBar: { flexDirection: "row", justifyContent: "space-between", padding: 16, paddingTop: 20 },
@@ -258,4 +361,7 @@ const styles = StyleSheet.create({
   btn: { paddingHorizontal: 18, justifyContent: "center", borderRadius: 14 },
   btnFull: { marginTop: 20, padding: 16, borderRadius: 999, borderWidth: 1, alignItems: "center" },
   payRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 12, borderBottomWidth: 1 },
+  tag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, borderWidth: 1 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 24 },
+  modalCard: { borderRadius: 20, borderWidth: 1, padding: 20 },
 });

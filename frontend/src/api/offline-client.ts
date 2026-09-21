@@ -7,8 +7,8 @@
 
 import * as db from '@/src/database/db';
 import { storage } from '@/src/utils/storage';
-import { hashPassword, verifyPassword } from '@/src/utils/auth';
 import { toLocalYMD } from '@/src/utils/date';
+import { computeLoanFields } from '@/src/utils/loanMath';
 
 export const TOKEN_KEY = 'auth_token';
 export const CURRENT_USER_KEY = 'current_user';
@@ -25,6 +25,7 @@ type BackupFile = {
   sections: db.BackupSection[];
   settings?: {
     theme_mode?: string | null;
+    currency_code?: string | null;
     current_user?: StoredUser | null;
   };
   data: db.BackupData;
@@ -32,9 +33,9 @@ type BackupFile = {
 
 // ============ AUTH API ============
 
-export async function apiRegister(email: string, password: string, fullName?: string) {
+export async function apiRegister(email: string, fullName?: string) {
   // Create user in database
-  const userId = await db.createUser(email, await hashPassword(password), fullName);
+  const userId = await db.createUser(email, fullName);
 
   // Create token (just the user ID for offline)
   const token = userId;
@@ -54,11 +55,11 @@ export async function apiRegister(email: string, password: string, fullName?: st
   };
 }
 
-export async function apiLogin(email: string, password: string) {
+export async function apiLogin(email: string) {
   const user = await db.getUserByEmail(email);
 
-  if (!user || !(await verifyPassword(password, user.hashed_password))) {
-    throw new Error('Invalid email or password');
+  if (!user) {
+    throw new Error('No account found with this email');
   }
 
   // Create token
@@ -102,19 +103,10 @@ export async function apiGetDebugUsers() {
   return db.getAllUsersForDebug();
 }
 
-export async function apiChangePassword(newPassword: string) {
-  const userId = await getCurrentUserId();
-  await db.updateUserPassword(userId, await hashPassword(newPassword));
-  return { ok: true };
-}
-
-export async function apiDeleteAccount(password: string) {
+export async function apiDeleteAccount() {
   const userId = await getCurrentUserId();
   const user = await db.getUserById(userId);
   if (!user) throw new Error('User not found');
-
-  const ok = await verifyPassword(password, user.hashed_password);
-  if (!ok) throw new Error('Incorrect password');
 
   await db.deleteUserAccount(userId);
   await storage.secureRemove(TOKEN_KEY);
@@ -135,6 +127,7 @@ export async function apiExportBackup(sections: db.BackupSection[]): Promise<Bac
 
   if (uniqueSections.includes('settings')) {
     const themeMode = await storage.getItem<string>('theme_mode', 'dark');
+    const currencyCode = await storage.getItem<string>('currency_code', 'USD');
     const currentUserJson = await storage.secureGet<string>(CURRENT_USER_KEY, '');
     let currentUser: StoredUser | null = null;
     if (currentUserJson) {
@@ -147,6 +140,7 @@ export async function apiExportBackup(sections: db.BackupSection[]): Promise<Bac
 
     backup.settings = {
       theme_mode: themeMode,
+      currency_code: currencyCode,
       current_user: currentUser,
     };
   }
@@ -161,6 +155,9 @@ export async function apiImportBackup(file: BackupFile, sections: db.BackupSecti
 
   if (uniqueSections.includes('settings') && file?.settings?.theme_mode) {
     await storage.setItem('theme_mode', file.settings.theme_mode);
+  }
+  if (uniqueSections.includes('settings') && file?.settings?.currency_code) {
+    await storage.setItem('currency_code', file.settings.currency_code);
   }
 
   return { ok: true };
@@ -236,21 +233,22 @@ export async function apiGetCategories() {
   return categories;
 }
 
-export async function apiCreateCategory(name: string, type: 'income' | 'expense') {
+export async function apiCreateCategory(name: string, type: 'income' | 'expense', icon?: string | null) {
   const userId = await getCurrentUserId();
-  const categoryId = await db.createCategory(userId, name, type);
+  const categoryId = await db.createCategory(userId, name, type, icon);
   return {
     id: categoryId,
     user_id: userId,
     name,
     type,
+    icon: icon || null,
     created_at: new Date().toISOString(),
   };
 }
 
-export async function apiUpdateCategory(categoryId: string, name: string, type: 'income' | 'expense') {
+export async function apiUpdateCategory(categoryId: string, name: string, type: 'income' | 'expense', icon?: string | null) {
   const userId = await getCurrentUserId();
-  await db.updateCategory(categoryId, userId, name, type);
+  await db.updateCategory(categoryId, userId, name, type, icon);
   return { ok: true };
 }
 
@@ -335,6 +333,7 @@ export async function apiGetTransactions(params: {
   member_ids?: string;
   type?: 'income' | 'expense';
   category?: string;
+  categories?: string;
   start_date?: string;
   end_date?: string;
   tag_ids?: string;
@@ -345,6 +344,7 @@ export async function apiGetTransactions(params: {
     memberIds: params.member_ids ? params.member_ids.split(',') : undefined,
     type: params.type,
     category: params.category,
+    categories: params.categories ? params.categories.split(',') : undefined,
     startDate: params.start_date,
     endDate: params.end_date,
     tagIds: params.tag_ids ? params.tag_ids.split(',') : undefined,
@@ -484,6 +484,14 @@ export async function apiCloseInvestment(invId: string) {
     end_date: toLocalYMD(new Date()),
   });
   return { ok: true };
+}
+
+export async function apiMatureInvestment(invId: string, body: { amount: number; date?: string }) {
+  const userId = await getCurrentUserId();
+  const date = body.date || toLocalYMD(new Date());
+  const result = await db.matureInvestment(invId, userId, body.amount, date);
+  if (!result) throw new Error('Investment not found');
+  return { ok: true, tx_id: result.tx_id };
 }
 
 // ============ LOANS API ============
@@ -840,6 +848,7 @@ export const api = {
         member_ids: url.searchParams.get('member_ids') || undefined,
         type: (url.searchParams.get('type') as any) || undefined,
         category: url.searchParams.get('category') || undefined,
+        categories: url.searchParams.get('categories') || undefined,
         start_date: url.searchParams.get('start_date') || undefined,
         end_date: url.searchParams.get('end_date') || undefined,
         tag_ids: url.searchParams.get('tag_ids') || undefined,
@@ -880,10 +889,10 @@ export const api = {
   },
 
   post: async (path: string, body?: any) => {
-    if (path === '/auth/login') return apiLogin(body.email, body.password);
-    if (path === '/auth/register') return apiRegister(body.email, body.password, body.full_name);
+    if (path === '/auth/login') return apiLogin(body.email);
+    if (path === '/auth/register') return apiRegister(body.email, body.full_name);
     if (path === '/members') return apiCreateMember(body.name, body.relation, body.color);
-    if (path === '/categories') return apiCreateCategory(body.name, body.type);
+    if (path === '/categories') return apiCreateCategory(body.name, body.type, body.icon);
     if (path === '/tags') return apiCreateTag(body.name);
     if (path === '/category-rules') return apiUpsertCategoryRule(body.keyword, body.category, body.category_type, body.tag_ids);
     if (path === '/category-rules/apply') return apiApplyCategoryRuleToExisting(body.keyword, body.category, body.category_type, body.tag_ids);
@@ -901,15 +910,21 @@ export const api = {
       const invId = path.split('/')[2];
       return apiCloseInvestment(invId);
     }
+    if (path.startsWith('/investments/') && path.endsWith('/mature')) {
+      const invId = path.split('/')[2];
+      return apiMatureInvestment(invId, body);
+    }
     if (path === '/loans') return apiCreateLoan(body);
     if (path.startsWith('/loans/') && path.endsWith('/payment')) {
       const loanId = path.split('/')[2];
       return apiAddLoanPayment(loanId, body);
     }
+    if (path.startsWith('/loans/') && path.endsWith('/close')) {
+      const loanId = path.split('/')[2];
+      return apiCloseLoan(loanId);
+    }
     if (path === '/loans/compute') {
-      // For loan computation, just return the input values
-      // A real implementation would do financial calculations
-      return body;
+      return computeLoanFields(body || {});
     }
     if (path.startsWith('/reminders/pay')) {
       return apiPayReminder(body || {});
@@ -936,7 +951,7 @@ export const api = {
     }
     if (path.startsWith('/categories/')) {
       const categoryId = path.split('/')[2];
-      return apiUpdateCategory(categoryId, body.name, body.type);
+      return apiUpdateCategory(categoryId, body.name, body.type, body.icon);
     }
     if (path.startsWith('/tags/')) {
       const tagId = path.split('/')[2];
@@ -994,11 +1009,7 @@ export const api = {
     return apiImportBackup(file, sections, mode);
   },
 
-  changePassword: async (newPassword: string) => {
-    return apiChangePassword(newPassword);
-  },
-
-  deleteAccount: async (password: string) => {
-    return apiDeleteAccount(password);
+  deleteAccount: async () => {
+    return apiDeleteAccount();
   },
 };

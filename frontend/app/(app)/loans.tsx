@@ -7,6 +7,10 @@ import { api } from "@/src/api/client";
 import { inr } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
 import MemberChips from "@/src/components/MemberChips";
+import FilterSection from "@/src/components/FilterSection";
+import SegmentedControl from "@/src/components/SegmentedControl";
+import FilterModal from "@/src/components/FilterModal";
+import { confirmAction } from "@/src/utils/confirm";
 
 export default function Loans() {
   const { theme } = useTheme();
@@ -34,10 +38,10 @@ export default function Loans() {
   const visible = items.filter((i) => (i.status || "active") === statusFilter);
 
   const onDelete = (id: string) => {
-    Alert.alert("Delete?", "Remove this loan?", [
-      { text: "Cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => { await api.del(`/loans/${id}`); load(); } },
-    ]);
+    confirmAction("Delete?", "Remove this loan?", "Delete", async () => {
+      await api.del(`/loans/${id}`);
+      load();
+    });
   };
 
   return (
@@ -53,20 +57,22 @@ export default function Loans() {
         </TouchableOpacity>
       </View>
 
-      {showFilters && (
-        <>
-          <MemberChips members={members} selected={selected} onChange={setSelected} />
+      <View style={{ paddingHorizontal: 24, marginTop: 12 }}>
+        <SegmentedControl
+          value={statusFilter}
+          onChange={(v) => setStatusFilter(v as typeof statusFilter)}
+          options={[
+            { key: "active", label: "Active", testID: "loan-status-active" },
+            { key: "closed", label: "Closed", testID: "loan-status-closed" },
+          ]}
+        />
+      </View>
 
-          <View style={styles.statusRow}>
-            {(["active", "closed"] as const).map((s) => (
-              <TouchableOpacity key={s} testID={`loan-status-${s}`} onPress={() => setStatusFilter(s)}
-                style={[styles.statusChip, { backgroundColor: statusFilter === s ? theme.primary : theme.surface, borderColor: statusFilter === s ? theme.primary : theme.border }]}> 
-                <Text style={{ color: statusFilter === s ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12, textTransform: "capitalize" }}>{s}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </>
-      )}
+      <FilterModal visible={showFilters} onClose={() => setShowFilters(false)} doneTestID="loans-filters-done" topOffset={64}>
+        <FilterSection icon="people-outline" label="MEMBER" first>
+          <MemberChips members={members} selected={selected} onChange={setSelected} inline />
+        </FilterSection>
+      </FilterModal>
 
       <FlatList
         data={visible}
@@ -116,16 +122,6 @@ export default function Loans() {
       >
         <Ionicons name="add" size={28} color={theme.primaryText} />
       </TouchableOpacity>
-
-      {showFilters && (
-        <TouchableOpacity
-          testID="loans-filters-done"
-          onPress={() => setShowFilters(false)}
-          style={[styles.doneFab, { backgroundColor: theme.primary }]}
-        >
-          <Text style={{ color: theme.primaryText, fontWeight: "700" }}>Done</Text>
-        </TouchableOpacity>
-      )}
     </Screen>
   );
 }
@@ -135,11 +131,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: "700", letterSpacing: -0.5 },
   filterBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   card: { padding: 18, borderRadius: 22, borderWidth: 1, marginBottom: 12 },
-  statusRow: { flexDirection: "row", paddingHorizontal: 24, gap: 8, marginBottom: 8 },
-  statusChip: { paddingHorizontal: 16, height: 32, borderRadius: 999, borderWidth: 1, justifyContent: "center" },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   progressTrack: { height: 6, borderRadius: 3, marginTop: 14, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 3 },
   fab: { position: "absolute", right: 24, bottom: 20, width: 56, height: 56, borderRadius: 28, justifyContent: "center", alignItems: "center" },
-  doneFab: { position: "absolute", right: 24, bottom: 24, paddingHorizontal: 18, height: 42, borderRadius: 999, justifyContent: "center", alignItems: "center" },
 });

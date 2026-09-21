@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, ImageBackground, ActivityIndicator, RefreshControl, useWindowDimensions, TouchableOpacity, Alert, Platform, Modal } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useFilters, type DateRangeKey } from "@/src/contexts/FilterContext";
@@ -10,7 +11,10 @@ import { inr, inrFull } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
 import PieChart from "@/src/components/PieChart";
 import MemberChips from "@/src/components/MemberChips";
-import { toLocalYMD } from "@/src/utils/date";
+import FilterSection from "@/src/components/FilterSection";
+import FilterModal from "@/src/components/FilterModal";
+import FilterChip from "@/src/components/FilterChip";
+import { toLocalYMD, formatLongDate } from "@/src/utils/date";
 
 const BG_DARK = "https://images.pexels.com/photos/29041985/pexels-photo-29041985.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 const BG_LIGHT = "https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGxpZ2h0JTIwd2F2ZXMlMjB0ZXh0dXJlfGVufDB8fHx8MTc4MDY0NDMxOXww&ixlib=rb-4.1.0&q=85";
@@ -110,6 +114,21 @@ export default function Dashboard() {
   // Pie: income allocation (expense categories + saved)
   const pieData = [...expenseBreakdown.map((e) => ({ label: e.category, value: e.amount })), { label: "Saved", value: saved, color: "#22C55E" }];
 
+  const RANGE_LABELS: Record<string, string> = {
+    all: "All time",
+    year: "1 yr",
+    "3mo": "3 months",
+    month: "This month",
+    last: "Last month",
+  };
+  const rangeLabel = range === "custom"
+    ? (custom.start && custom.end ? `${monthKey(parseYMD(custom.start))} → ${monthKey(parseYMD(custom.end))}` : "Custom")
+    : RANGE_LABELS[range] || range;
+  const memberLabel = selected.length === 0
+    ? "All members"
+    : members.filter((m) => selected.includes(m.id)).map((m) => m.name).join(", ") || "All members";
+  const filterSummary = `${rangeLabel} • ${memberLabel}`;
+
   return (
     <Screen>
       <ScrollView
@@ -137,37 +156,6 @@ export default function Dashboard() {
             </TouchableOpacity>
           </View>
         </View>
-
-        {showFilters && (
-          <View style={styles.filterPanel}>
-            {/* Range pills */}
-            <View style={{ height: 48, width: "100%", overflow: "hidden" }}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rangeRow} style={{ width: "100%" }}>
-                {([
-                  { k: "all", l: "All time" },
-                  { k: "year", l: "1 yr" },
-                  { k: "3mo", l: "3 mo" },
-                  { k: "month", l: "This month" },
-                  { k: "last", l: "Last month" },
-                ] as { k: Range; l: string }[]).map((r) => (
-                  <TouchableOpacity key={r.k} testID={`range-${r.k}`} onPress={() => setRange(r.k)}
-                    style={[styles.rangeChip, { backgroundColor: range === r.k ? theme.primary : theme.surface, borderColor: range === r.k ? theme.primary : theme.border }]}>
-                    <Text style={{ color: range === r.k ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{r.l}</Text>
-                  </TouchableOpacity>
-                ))}
-                <TouchableOpacity testID="range-custom" onPress={() => { setRange("custom"); setShowCustom(true); }}
-                  style={[styles.rangeChip, { backgroundColor: range === "custom" ? theme.primary : theme.surface, borderColor: range === "custom" ? theme.primary : theme.border, flexDirection: "row", gap: 4 }]}>
-                  <Ionicons name="calendar-outline" size={14} color={range === "custom" ? theme.primaryText : theme.textMuted} />
-                  <Text style={{ color: range === "custom" ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>
-                    {range === "custom" ? `${monthKey(parseYMD(custom.start))} → ${monthKey(parseYMD(custom.end))}` : "Custom"}
-                  </Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
-
-            <MemberChips members={members} selected={selected} onChange={setSelected} />
-          </View>
-        )}
 
         {/* Net worth hero (all-time active) */}
         <ImageBackground
@@ -215,15 +203,19 @@ export default function Dashboard() {
         {/* Range-scoped stat tiles */}
         <View style={styles.row}>
           <StatCard label="CURRENT BALANCE" value={inr(data?.current_balance || 0)} sub={`After EMI/SIP outflows`} subColor={theme.textMuted} />
-          <StatCard label="INVESTED (RANGE)" value={inr(data?.total_invested || 0)} sub={`${data?.active_investments || 0} active`} subColor={theme.textMuted} />
+          <StatCard label="TOTAL INVESTMENT" value={inr(data?.total_invested || 0)} sub={`${data?.active_investments || 0} active`} subColor={theme.textMuted} />
         </View>
-        <View style={styles.row}>
-          <StatCard label="INCOME" value={inr(income)} sub="this period" subColor={theme.positive} />
-          <StatCard label="EXPENSE" value={inr(expense)} sub="this period" subColor={theme.negative} />
+
+        <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 1, fontWeight: "700", paddingHorizontal: 24, marginTop: 20 }} numberOfLines={1}>
+          {filterSummary}
+        </Text>
+        <View style={[styles.row, { marginTop: 8 }]}>
+          <StatCard label="INCOME" value={inr(income)} subColor={theme.positive} />
+          <StatCard label="EXPENSE" value={inr(expense)} subColor={theme.negative} />
         </View>
         <View style={styles.row}>
           <StatCard label="LOAN OUTSTANDING" value={inr(data?.loan_outstanding || 0)} sub={`${data?.active_loans || 0} new`} subColor={theme.textMuted} />
-          <StatCard label="SAVED" value={inr(saved)} sub="this period" subColor={theme.positive} />
+          <StatCard label="SAVED" value={inr(saved)} subColor={theme.positive} />
         </View>
 
         {/* Pie chart */}
@@ -291,16 +283,34 @@ export default function Dashboard() {
         value={{ from: parseYMD(custom.start), to: parseYMD(custom.end) }}
         onChange={(v: { from: Date; to: Date }) => { setCustom({ start: ymd(v.from), end: ymd(v.to) }); setRange("custom"); }}
       />
-      <DrilldownModal visible={!!drilldown} data={drilldown} onClose={() => setDrilldown(null)} />
-      {showFilters && (
-        <TouchableOpacity
-          testID="dashboard-filters-done"
-          onPress={() => setShowFilters(false)}
-          style={[styles.doneFab, { backgroundColor: theme.primary }]}
-        >
-          <Text style={{ color: theme.primaryText, fontWeight: "700" }}>Done</Text>
-        </TouchableOpacity>
-      )}
+      <DrilldownModal visible={!!drilldown} data={drilldown} members={members} onClose={() => setDrilldown(null)} />
+
+      <FilterModal visible={showFilters} onClose={() => setShowFilters(false)} doneTestID="dashboard-filters-done" topOffset={82}>
+        <FilterSection icon="calendar-outline" label="DATE RANGE" first>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            {([
+              { k: "all", l: "All time" },
+              { k: "year", l: "1 yr" },
+              { k: "3mo", l: "3 months" },
+              { k: "month", l: "This month" },
+              { k: "last", l: "Last month" },
+            ] as { k: Range; l: string }[]).map((r) => (
+              <FilterChip key={r.k} testID={`range-${r.k}`} label={r.l} active={range === r.k} onPress={() => setRange(r.k)} />
+            ))}
+            <FilterChip
+              testID="range-custom"
+              icon="calendar-clear-outline"
+              label={range === "custom" ? `${monthKey(parseYMD(custom.start))} → ${monthKey(parseYMD(custom.end))}` : "Custom"}
+              active={range === "custom"}
+              onPress={() => { setRange("custom"); setShowCustom(true); }}
+            />
+          </ScrollView>
+        </FilterSection>
+
+        <FilterSection icon="people-outline" label="MEMBER">
+          <MemberChips members={members} selected={selected} onChange={setSelected} inline />
+        </FilterSection>
+      </FilterModal>
     </Screen>
   );
 }
@@ -318,6 +328,7 @@ function StatCard({ label, value, sub, subColor }: { label: string; value: strin
 
 function CustomRangeModal({ visible, onClose, value, onChange }: any) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [from, setFrom] = useState<Date>(value.from);
   const [to, setTo] = useState<Date>(value.to);
 
@@ -330,7 +341,7 @@ function CustomRangeModal({ visible, onClose, value, onChange }: any) {
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
       <TouchableOpacity activeOpacity={1} onPress={onClose} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 24 + insets.bottom }]}>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700", marginBottom: 16 }}>Custom Range (by Month)</Text>
           <MonthPicker label="FROM" date={from} onShift={(d) => setMonth("from", d)} />
           <MonthPicker label="TO" date={to} onShift={(d) => setMonth("to", d)} />
@@ -358,14 +369,16 @@ function MonthPicker({ label, date, onShift }: any) {
   );
 }
 
-function DrilldownModal({ visible, data, onClose }: any) {
+function DrilldownModal({ visible, data, members, onClose }: any) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   if (!data) return null;
   const total = data.items.reduce((s: number, t: any) => s + t.amount, 0);
+  const memberName = (id: string) => (members || []).find((m: any) => m.id === id)?.name || "—";
   return (
     <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
-        <View style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, maxHeight: "80%" }]}>
+      <TouchableOpacity activeOpacity={1} onPress={onClose} style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "flex-end" }}>
+        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, maxHeight: "80%", paddingBottom: 24 + insets.bottom }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <View>
               <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>{data.category}</Text>
@@ -379,14 +392,14 @@ function DrilldownModal({ visible, data, onClose }: any) {
               <View key={t.id} style={{ flexDirection: "row", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: theme.border }}>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: theme.text, fontWeight: "600" }}>{t.notes || t.category}</Text>
-                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{t.date}</Text>
+                  <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{formatLongDate(t.date)} • {memberName(t.member_id)}</Text>
                 </View>
                 <Text style={{ color: t.type === "income" ? theme.positive : theme.text, fontWeight: "700" }}>{inr(t.amount)}</Text>
               </View>
             ))}
           </ScrollView>
-        </View>
-      </View>
+        </TouchableOpacity>
+      </TouchableOpacity>
     </Modal>
   );
 }
@@ -398,9 +411,6 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
   bellBadge: { minWidth: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
   filterBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
-  filterPanel: { marginTop: 6 },
-  rangeRow: { paddingHorizontal: 24, gap: 8, alignItems: "center", height: 48 },
-  rangeChip: { paddingHorizontal: 14, height: 32, borderRadius: 999, borderWidth: 1, justifyContent: "center", alignItems: "center", flexShrink: 0 },
   heroCard: { marginHorizontal: 24, marginTop: 8, padding: 24, borderRadius: 28, minHeight: 180, justifyContent: "space-between", overflow: "hidden" },
   heroLabel: { fontSize: 11, letterSpacing: 3, fontWeight: "700" },
   heroValue: { fontSize: 38, fontWeight: "700", marginTop: 8, letterSpacing: -1 },
@@ -420,5 +430,4 @@ const styles = StyleSheet.create({
   subRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, gap: 8 },
   subDot: { width: 4, height: 4, borderRadius: 2 },
   sheet: { padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1 },
-  doneFab: { position: "absolute", right: 24, bottom: 24, paddingHorizontal: 18, height: 42, borderRadius: 999, justifyContent: "center", alignItems: "center" },
 });

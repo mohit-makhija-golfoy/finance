@@ -2,12 +2,18 @@ import React, { useCallback, useMemo, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert, Platform, Modal, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
+import * as Sharing from "expo-sharing";
+import { File, Paths } from "expo-file-system";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { useAuth } from "@/src/contexts/AuthContext";
+import { useCurrency } from "@/src/contexts/CurrencyContext";
+import { CURRENCY_LIST, isCurrencyCode } from "@/src/constants/currency";
 import { api } from "@/src/api/client";
 import Screen from "@/src/components/Screen";
 import Checkbox from "@/src/components/Checkbox";
-import { validatePassword } from "@/src/utils/auth";
+import { confirmAction } from "@/src/utils/confirm";
 import type { BackupSection } from "@/src/database/db";
 
 const BACKUP_OPTIONS: { key: BackupSection; label: string; description: string }[] = [
@@ -19,7 +25,7 @@ const BACKUP_OPTIONS: { key: BackupSection; label: string; description: string }
   { key: "transactions", label: "Transactions", description: "Income and expense entries" },
   { key: "investments", label: "Investments", description: "Investments, value history, and withdrawals" },
   { key: "loans", label: "Loans", description: "Loans and payment history" },
-  { key: "settings", label: "Settings", description: "Theme mode and active session" },
+  { key: "settings", label: "Settings", description: "Theme mode, currency, and active session" },
 ];
 
 type BackupAction = "export" | "import" | null;
@@ -35,18 +41,22 @@ function createDefaultSelection(): SectionSelection {
 
 export default function More() {
   const { theme, mode, toggle, setModeValue } = useTheme();
+  const insets = useSafeAreaInsets();
   const { user, logout, refreshSession } = useAuth();
+  const { currency, setCurrencyCode } = useCurrency();
   const router = useRouter();
+  const [showCurrencyModal, setShowCurrencyModal] = useState(false);
   const [members, setMembers] = useState<any[]>([]);
   const [backupAction, setBackupAction] = useState<BackupAction>(null);
   const [sectionSelection, setSectionSelection] = useState<SectionSelection>(createDefaultSelection());
   const [busy, setBusy] = useState(false);
   const [importMode, setImportMode] = useState<ImportMode>("add");
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteChallenge, setDeleteChallenge] = useState({ a: 0, b: 0 });
+  const [deleteEmailInput, setDeleteEmailInput] = useState("");
+  const [deleteSumInput, setDeleteSumInput] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showFinalDeleteConfirm, setShowFinalDeleteConfirm] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -82,26 +92,64 @@ export default function More() {
     setBackupAction(null);
   };
 
+  const saveAndShareJson = async (data: unknown, filename: string) => {
+    if (Platform.OS === "web") {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const file = new File(Paths.cache, filename);
+    if (file.exists) file.delete();
+    file.write(JSON.stringify(data, null, 2));
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(file.uri, { mimeType: "application/json", dialogTitle: filename });
+    } else {
+      Alert.alert("Saved", `Backup saved to ${file.uri}`);
+    }
+  };
+
+  const pickAndReadJson = async (): Promise<any | null> => {
+    if (Platform.OS === "web") {
+      return new Promise((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "application/json,.json";
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (!file) { resolve(null); return; }
+          const reader = new FileReader();
+          reader.onload = () => resolve(JSON.parse(String(reader.result || "{}")));
+          reader.readAsText(file);
+        };
+        input.click();
+      });
+    }
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["application/json", "text/plain", "text/json", "*/*"],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled || !result.assets?.[0]) return null;
+    const file = new File(result.assets[0].uri);
+    return JSON.parse(await file.text());
+  };
+
   const exportBackup = async () => {
     if (!selectedSections.length) {
       Alert.alert("Select data", "Choose at least one section to export.");
-      return;
-    }
-    if (Platform.OS !== "web") {
-      Alert.alert("Web only", "Backup download/upload is currently available on web in this build.");
       return;
     }
 
     setBusy(true);
     try {
       const backup = await api.exportBackup(selectedSections);
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `family-finance-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      link.click();
-      URL.revokeObjectURL(url);
+      await saveAndShareJson(backup, `family-finance-backup-${new Date().toISOString().slice(0, 10)}.json`);
       setBackupAction(null);
     } catch (error: any) {
       Alert.alert("Export failed", error?.message || "Failed to export backup.");
@@ -115,135 +163,107 @@ export default function More() {
       Alert.alert("Select data", "Choose at least one section to import.");
       return;
     }
-    if (Platform.OS !== "web") {
-      Alert.alert("Web only", "Backup download/upload is currently available on web in this build.");
+
+    let parsed: any;
+    try {
+      parsed = await pickAndReadJson();
+    } catch (error: any) {
+      Alert.alert("Import failed", error?.message || "The backup file could not be read.");
       return;
     }
-
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "application/json,.json";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        setBusy(true);
-        try {
-          const parsed = JSON.parse(String(reader.result || "{}"));
-          if (importMode === "replace") {
-            const existingBackup = await api.exportBackup(selectedSections);
-            const replaceBlob = new Blob([JSON.stringify(existingBackup, null, 2)], { type: "application/json" });
-            const replaceUrl = URL.createObjectURL(replaceBlob);
-            const replaceLink = document.createElement("a");
-            replaceLink.href = replaceUrl;
-            replaceLink.download = `family-finance-pre-import-backup-${new Date().toISOString().slice(0, 10)}.json`;
-            replaceLink.click();
-            URL.revokeObjectURL(replaceUrl);
-          }
-
-          await api.importBackup(parsed, selectedSections, importMode);
-          if (selectedSections.includes("settings") && (parsed?.settings?.theme_mode === "light" || parsed?.settings?.theme_mode === "dark")) {
-            setModeValue(parsed.settings.theme_mode);
-          }
-          if (selectedSections.includes("users")) {
-            await refreshSession();
-          }
-          await load();
-          setBackupAction(null);
-          Alert.alert("Import complete", importMode === "replace" ? "Selected sections were backed up and then replaced successfully." : "Selected sections were added successfully.");
-        } catch (error: any) {
-          Alert.alert("Import failed", error?.message || "The backup file could not be imported.");
-        } finally {
-          setBusy(false);
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  };
-
-  const submitPasswordChange = async () => {
-    const trimmed = newPassword.trim();
-    const validation = validatePassword(trimmed);
-    if (!validation.valid) {
-      Alert.alert("Invalid password", validation.error || "Password is invalid.");
-      return;
-    }
-    if (trimmed !== confirmPassword.trim()) {
-      Alert.alert("Mismatch", "Password confirmation does not match.");
-      return;
-    }
+    if (!parsed) return;
 
     setBusy(true);
     try {
-      await api.changePassword(trimmed);
-      setNewPassword("");
-      setConfirmPassword("");
-      setShowPasswordModal(false);
-      Alert.alert("Password changed", "Your local password has been updated.");
+      if (importMode === "replace") {
+        const existingBackup = await api.exportBackup(selectedSections);
+        await saveAndShareJson(existingBackup, `family-finance-pre-import-backup-${new Date().toISOString().slice(0, 10)}.json`);
+      }
+
+      await api.importBackup(parsed, selectedSections, importMode);
+      if (selectedSections.includes("settings") && (parsed?.settings?.theme_mode === "light" || parsed?.settings?.theme_mode === "dark")) {
+        setModeValue(parsed.settings.theme_mode);
+      }
+      if (selectedSections.includes("settings") && parsed?.settings?.currency_code && isCurrencyCode(parsed.settings.currency_code)) {
+        setCurrencyCode(parsed.settings.currency_code);
+      }
+      if (selectedSections.includes("users")) {
+        await refreshSession();
+      }
+      await load();
+      setBackupAction(null);
+      Alert.alert("Import complete", importMode === "replace" ? "Selected sections were backed up and then replaced successfully." : "Selected sections were added successfully.");
     } catch (error: any) {
-      Alert.alert("Update failed", error?.message || "Could not change password.");
+      Alert.alert("Import failed", error?.message || "The backup file could not be imported.");
     } finally {
       setBusy(false);
     }
   };
 
   const startDeleteAccount = () => {
-    if (typeof window !== "undefined" && typeof window.confirm === "function") {
-      const ok = window.confirm("Are you sure you wanna delete your account? This will permanently remove all your data.");
-      if (ok) setShowDeleteAccountModal(true);
-      return;
-    }
-
-    Alert.alert(
-      "Delete account?",
-      "Are you sure you wanna delete your account? This will permanently remove all your data.",
-      [
-        { text: "Cancel" },
-        {
-          text: "Yes, continue",
-          style: "destructive",
-          onPress: () => setShowDeleteAccountModal(true),
-        },
-      ]
-    );
+    const a = Math.floor(Math.random() * 41) + 10;
+    const b = Math.floor(Math.random() * 41) + 10;
+    setDeleteChallenge({ a, b });
+    setDeleteEmailInput("");
+    setDeleteSumInput("");
+    setDeleteError(null);
+    setShowDeleteAccountModal(true);
   };
 
-  const submitDeleteAccount = async () => {
-    const password = deletePassword.trim();
-    if (!password) {
-      Alert.alert("Password required", "Enter your password to delete account.");
+  const submitDeleteAccount = () => {
+    setDeleteError(null);
+
+    if (!deleteEmailInput.trim() || !deleteSumInput.trim()) {
+      setDeleteError("Enter your email and the sum to continue.");
       return;
     }
 
+    const emailOk = deleteEmailInput.trim().toLowerCase() === (user?.email || "").toLowerCase();
+    const sumOk = parseInt(deleteSumInput.trim(), 10) === deleteChallenge.a + deleteChallenge.b;
+
+    if (!emailOk && !sumOk) {
+      setDeleteError("That email and sum don't match. Please try again.");
+      return;
+    }
+    if (!emailOk) {
+      setDeleteError("That email doesn't match your account email.");
+      return;
+    }
+    if (!sumOk) {
+      setDeleteError("That sum is incorrect.");
+      return;
+    }
+
+    setShowDeleteAccountModal(false);
+    setShowFinalDeleteConfirm(true);
+  };
+
+  const finalizeDeleteAccount = async () => {
     setBusy(true);
     try {
-      await api.deleteAccount(password);
-      setDeletePassword("");
-      setShowDeleteAccountModal(false);
-      if (typeof window !== "undefined" && typeof window.alert === "function") {
-        window.alert("Account deleted successfully.");
-      }
+      await api.deleteAccount();
+      setShowFinalDeleteConfirm(false);
       await logout();
       router.replace("/(auth)/login");
     } catch (error: any) {
-      const message = error?.message || "Could not delete account.";
-      if (typeof window !== "undefined" && typeof window.alert === "function") {
-        window.alert(`Delete failed: ${message}`);
-      } else {
-        Alert.alert("Delete failed", message);
-      }
+      setShowFinalDeleteConfirm(false);
+      Alert.alert("Delete failed", error?.message || "Could not delete account. Please try again.");
+      router.replace("/(app)/");
     } finally {
       setBusy(false);
     }
   };
 
+  const keepAccount = () => {
+    setShowFinalDeleteConfirm(false);
+    router.replace("/(app)/");
+  };
+
   const onDeleteMember = (id: string) => {
-    Alert.alert("Delete member?", "All linked records remain but unassigned.", [
-      { text: "Cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => { await api.del(`/members/${id}`); load(); } },
-    ]);
+    confirmAction("Delete member?", "All linked records remain but unassigned.", "Delete", async () => {
+      await api.del(`/members/${id}`);
+      load();
+    });
   };
 
   return (
@@ -327,14 +347,7 @@ export default function More() {
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </TouchableOpacity>
-        <TouchableOpacity testID="change-password" onPress={() => setShowPasswordModal(true)} style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}> 
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Ionicons name="key-outline" size={18} color={theme.text} />
-            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600" }}>Change password</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
-        </TouchableOpacity>
-        <TouchableOpacity testID="delete-account" onPress={startDeleteAccount} style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.negative + "44", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}> 
+        <TouchableOpacity testID="delete-account" onPress={startDeleteAccount} style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.negative + "44", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Ionicons name="trash-outline" size={18} color={theme.negative} />
             <Text style={{ color: theme.negative, fontSize: 16, fontWeight: "600" }}>Delete account</Text>
@@ -347,6 +360,20 @@ export default function More() {
           <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600" }}>Dark mode</Text>
           <Switch testID="dark-mode-switch" value={mode === "dark"} onValueChange={toggle} />
         </View>
+        <TouchableOpacity
+          testID="open-currency-picker"
+          onPress={() => setShowCurrencyModal(true)}
+          style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Ionicons name="cash-outline" size={18} color={theme.text} />
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: "600" }}>Currency</Text>
+          </View>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={{ color: theme.textMuted, fontSize: 14 }}>{currency.name} ({currency.symbol})</Text>
+            <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           testID="logout-button"
@@ -360,7 +387,7 @@ export default function More() {
 
       <Modal transparent visible={backupAction !== null} animationType="slide" onRequestClose={closeBackupModal}>
         <TouchableOpacity activeOpacity={1} onPress={closeBackupModal} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}> 
             <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700" }}>{backupAction === "export" ? "Export backup" : "Import backup"}</Text>
             <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>
               Tick the sections you want to {backupAction === "export" ? "include in the backup file" : "restore from the backup file"}.
@@ -408,51 +435,106 @@ export default function More() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal transparent visible={showPasswordModal} animationType="slide" onRequestClose={() => setShowPasswordModal(false)}>
-        <TouchableOpacity activeOpacity={1} onPress={() => !busy && setShowPasswordModal(false)} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
-            <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700" }}>Change password</Text>
-            <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>Set a new local password for this account. Old password is not required.</Text>
+      <Modal transparent visible={showDeleteAccountModal} animationType="slide" onRequestClose={() => !busy && setShowDeleteAccountModal(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => !busy && setShowDeleteAccountModal(false)} style={styles.backdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
+            <Text style={{ color: theme.negative, fontSize: 20, fontWeight: "700" }}>Delete account</Text>
+            <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>
+              This permanently deletes your account and all its data. To confirm, enter your account email and the sum of the two numbers below.
+            </Text>
 
-            <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>NEW PASSWORD</Text>
-            <TextInput secureTextEntry value={newPassword} onChangeText={setNewPassword} placeholder="Minimum 6 characters" placeholderTextColor={theme.textMuted} style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]} />
+            <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>ACCOUNT EMAIL</Text>
+            <TextInput
+              testID="delete-email-input"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              value={deleteEmailInput}
+              onChangeText={setDeleteEmailInput}
+              placeholder={user?.email || "you@example.com"}
+              placeholderTextColor={theme.textMuted}
+              style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+            />
 
-            <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>CONFIRM PASSWORD</Text>
-            <TextInput secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Re-enter password" placeholderTextColor={theme.textMuted} style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]} />
+            <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>
+              WHAT IS {deleteChallenge.a} + {deleteChallenge.b}?
+            </Text>
+            <TextInput
+              testID="delete-sum-input"
+              keyboardType="number-pad"
+              value={deleteSumInput}
+              onChangeText={setDeleteSumInput}
+              placeholder="Enter the sum"
+              placeholderTextColor={theme.textMuted}
+              style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+            />
 
-            <TouchableOpacity testID="submit-password-change" onPress={() => { void submitPasswordChange(); }} disabled={busy} style={[styles.primaryBtn, { backgroundColor: theme.primary, opacity: busy ? 0.6 : 1 }]}> 
-              <Text style={{ color: theme.primaryText, fontWeight: "700" }}>{busy ? "Saving..." : "Update password"}</Text>
+            {deleteError && <Text testID="delete-account-error" style={{ color: theme.negative, marginTop: 12, fontSize: 13 }}>{deleteError}</Text>}
+
+            <TouchableOpacity testID="confirm-delete-account" onPress={submitDeleteAccount} style={[styles.primaryBtn, { backgroundColor: theme.negative }]}>
+              <Text style={{ color: "#fff", fontWeight: "700" }}>Continue</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowPasswordModal(false)} style={[styles.secondaryBtn, { borderColor: theme.border }]}>
+            <TouchableOpacity onPress={() => setShowDeleteAccountModal(false)} style={[styles.secondaryBtn, { borderColor: theme.border }]}>
               <Text style={{ color: theme.text, fontWeight: "600" }}>Cancel</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
 
-      <Modal transparent visible={showDeleteAccountModal} animationType="slide" onRequestClose={() => setShowDeleteAccountModal(false)}>
-        <TouchableOpacity activeOpacity={1} onPress={() => !busy && setShowDeleteAccountModal(false)} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
-            <Text style={{ color: theme.negative, fontSize: 20, fontWeight: "700" }}>Delete account</Text>
+      <Modal transparent visible={showFinalDeleteConfirm} animationType="fade" onRequestClose={() => !busy && keepAccount()}>
+        <TouchableOpacity activeOpacity={1} onPress={() => !busy && keepAccount()} style={styles.backdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
+            <Text style={{ color: theme.negative, fontSize: 20, fontWeight: "700" }}>Are you absolutely sure?</Text>
             <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>
-              Enter your password to permanently delete this account and all related data.
+              This is your last chance to back out. Deleting your account permanently removes all your data and cannot be undone.
             </Text>
 
-            <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>PASSWORD</Text>
-            <TextInput
-              secureTextEntry
-              value={deletePassword}
-              onChangeText={setDeletePassword}
-              placeholder="Enter password"
-              placeholderTextColor={theme.textMuted}
-              style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
-            />
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
+              <TouchableOpacity
+                testID="finalize-delete-account"
+                onPress={() => { void finalizeDeleteAccount(); }}
+                disabled={busy}
+                style={[styles.primaryBtn, { flex: 1, marginTop: 0, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, opacity: busy ? 0.6 : 1 }]}
+              >
+                <Text style={{ color: theme.text, fontWeight: "700" }}>{busy ? "Deleting..." : "Delete permanently"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                testID="keep-account"
+                onPress={keepAccount}
+                disabled={busy}
+                style={[styles.primaryBtn, { flex: 1, marginTop: 0, backgroundColor: theme.negative, opacity: busy ? 0.6 : 1 }]}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700" }}>Keep the account</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
-            <TouchableOpacity testID="confirm-delete-account" onPress={() => { void submitDeleteAccount(); }} disabled={busy} style={[styles.primaryBtn, { backgroundColor: theme.negative, opacity: busy ? 0.6 : 1 }]}> 
-              <Text style={{ color: "#fff", fontWeight: "700" }}>{busy ? "Deleting..." : "Delete account permanently"}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setShowDeleteAccountModal(false)} style={[styles.secondaryBtn, { borderColor: theme.border }]}> 
-              <Text style={{ color: theme.text, fontWeight: "600" }}>Cancel</Text>
+      <Modal transparent visible={showCurrencyModal} animationType="slide" onRequestClose={() => setShowCurrencyModal(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowCurrencyModal(false)} style={styles.backdrop}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
+            <Text style={{ color: theme.text, fontSize: 20, fontWeight: "700" }}>Currency</Text>
+            <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>Choose your country/currency. Amounts everywhere will use this symbol.</Text>
+
+            <ScrollView style={{ maxHeight: 360, marginTop: 16 }}>
+              {CURRENCY_LIST.map((c) => (
+                <TouchableOpacity
+                  key={c.code}
+                  testID={`currency-option-${c.code}`}
+                  onPress={() => { setCurrencyCode(c.code); setShowCurrencyModal(false); }}
+                  style={[styles.optionCard, { borderColor: c.code === currency.code ? theme.primary : theme.border, backgroundColor: c.code === currency.code ? theme.primary + "22" : "transparent", flexDirection: "row", alignItems: "center", justifyContent: "space-between" }]}
+                >
+                  <View>
+                    <Text style={{ color: theme.text, fontWeight: "700" }}>{c.country}</Text>
+                    <Text style={{ color: theme.textMuted, fontSize: 12, marginTop: 2 }}>{c.name} ({c.symbol})</Text>
+                  </View>
+                  {c.code === currency.code && <Ionicons name="checkmark-circle" size={20} color={theme.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity onPress={() => setShowCurrencyModal(false)} style={[styles.secondaryBtn, { borderColor: theme.border }]}>
+              <Text style={{ color: theme.text, fontWeight: "600" }}>Close</Text>
             </TouchableOpacity>
           </TouchableOpacity>
         </TouchableOpacity>

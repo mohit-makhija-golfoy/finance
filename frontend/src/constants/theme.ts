@@ -1,3 +1,5 @@
+import { CURRENCIES, CurrencyCode, CurrencyConfig, DEFAULT_CURRENCY_CODE } from "./currency";
+
 export const palette = {
   dark: {
     background: "#09090B",
@@ -30,18 +32,35 @@ export const palette = {
 export type ThemeMode = "dark" | "light";
 export type Theme = typeof palette.dark;
 
+let activeCurrency: CurrencyConfig = CURRENCIES[DEFAULT_CURRENCY_CODE];
+
+export const setActiveCurrency = (code: CurrencyCode) => {
+  activeCurrency = CURRENCIES[code] || CURRENCIES[DEFAULT_CURRENCY_CODE];
+};
+
+export const getActiveCurrency = () => activeCurrency;
+
+// Compact form: uses Indian lakh/crore units for INR, international K/M/B otherwise.
 export const inr = (n: number) => {
   const v = Math.round((n || 0) * 100) / 100;
   const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
   let formatted: string;
-  if (abs >= 10000000) formatted = `${(abs / 10000000).toFixed(2)}Cr`;
-  else if (abs >= 100000) formatted = `${(abs / 100000).toFixed(2)}L`;
-  else if (abs >= 1000) formatted = `${(abs / 1000).toFixed(1)}K`;
-  else formatted = abs.toFixed(0);
-  return `${v < 0 ? "-" : ""}\u20B9${formatted}`;
+  if (activeCurrency.code === "INR") {
+    if (abs >= 10000000) formatted = `${(abs / 10000000).toFixed(2)}Cr`;
+    else if (abs >= 100000) formatted = `${(abs / 100000).toFixed(2)}L`;
+    else if (abs >= 1000) formatted = `${(abs / 1000).toFixed(1)}K`;
+    else formatted = abs.toFixed(0);
+  } else {
+    if (abs >= 1000000000) formatted = `${(abs / 1000000000).toFixed(2)}B`;
+    else if (abs >= 1000000) formatted = `${(abs / 1000000).toFixed(2)}M`;
+    else if (abs >= 1000) formatted = `${(abs / 1000).toFixed(1)}K`;
+    else formatted = abs.toFixed(0);
+  }
+  return `${sign}${activeCurrency.symbol}${formatted}`;
 };
 
 export const inrFull = (n: number) => {
   const v = Math.round((n || 0) * 100) / 100;
-  return `\u20B9${v.toLocaleString("en-IN")}`;
+  return `${activeCurrency.symbol}${v.toLocaleString(activeCurrency.locale)}`;
 };

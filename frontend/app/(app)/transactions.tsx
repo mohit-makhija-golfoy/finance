@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { useFilters, type DateRangeKey } from "@/src/contexts/FilterContext";
 import { api } from "@/src/api/client";
@@ -10,21 +11,15 @@ import Screen from "@/src/components/Screen";
 import MemberChips from "@/src/components/MemberChips";
 import DateField from "@/src/components/DateField";
 import Checkbox from "@/src/components/Checkbox";
-import { toLocalYMD } from "@/src/utils/date";
+import FilterSection from "@/src/components/FilterSection";
+import SegmentedControl from "@/src/components/SegmentedControl";
+import FilterModal from "@/src/components/FilterModal";
+import FilterChip from "@/src/components/FilterChip";
+import { resolveCategoryIcon } from "@/src/utils/categoryIcons";
+import { toLocalYMD, formatLongDate as formatDateOnly } from "@/src/utils/date";
 
 type Range = DateRangeKey;
 type SortOption = "price_asc" | "price_desc" | "date_new" | "date_old";
-
-function formatDateOnly(value?: string) {
-  if (!value) return "-";
-  const d = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-US", {
-    month: "long",
-    day: "2-digit",
-    year: "numeric",
-  });
-}
 
 function parseAutoReference(note?: string | null) {
   const raw = String(note || "");
@@ -82,12 +77,15 @@ function rangeFor(r: Range, custom?: { start: string; end: string }): { start_da
 
 export default function Transactions() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [tags, setTags] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [selectedCategoryNames, setSelectedCategoryNames] = useState<string[]>([]);
   const [filter, setFilter] = useState<"all" | "income" | "expense">("all");
   const { range, setRange, customRange, setCustomRange } = useFilters();
   const [showFilters, setShowFilters] = useState(false);
@@ -110,19 +108,22 @@ export default function Transactions() {
     const params = new URLSearchParams();
     if (selected.length) params.set("member_ids", selected.join(","));
     if (selectedTagIds.length) params.set("tag_ids", selectedTagIds.join(","));
+    if (selectedCategoryNames.length) params.set("categories", selectedCategoryNames.join(","));
     if (filter !== "all") params.set("type", filter);
     const { start_date, end_date } = rangeFor(range, customRange);
     if (start_date) params.set("start_date", start_date);
     if (end_date) params.set("end_date", end_date);
-    const [m, tagList, t] = await Promise.all([
+    const [m, tagList, cats, t] = await Promise.all([
       api.get("/members"),
       api.get("/tags"),
+      api.get("/categories"),
       api.get(`/transactions?${params.toString()}`),
     ]);
     setMembers(m);
     setTags(tagList);
+    setCategories(cats);
     setItems(t);
-  }, [selected, selectedTagIds, filter, range, customRange]);
+  }, [selected, selectedTagIds, selectedCategoryNames, filter, range, customRange]);
 
   const pendingReopenCategoryRef = useRef<string | null>(null);
 
@@ -315,13 +316,13 @@ export default function Transactions() {
         </View>
       </View>
 
-      {showFilters && (
-        <>
-          <MemberChips members={members} selected={selected} onChange={setSelected} />
+      <FilterModal visible={showFilters} onClose={() => setShowFilters(false)} doneTestID="transactions-filters-done" topOffset={72}>
+          <FilterSection icon="people-outline" label="MEMBER" first>
+            <MemberChips members={members} selected={selected} onChange={setSelected} inline />
+          </FilterSection>
 
-          <View style={{ paddingHorizontal: 24, marginTop: 8, width: "100%", overflow: "hidden" }}>
-            <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginBottom: 8 }}>DATE RANGE</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }} style={{ width: "100%" }}>
+          <FilterSection icon="calendar-outline" label="DATE RANGE">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
               {([
                 { k: "all", l: "All time" },
                 { k: "year", l: "1 yr" },
@@ -329,50 +330,56 @@ export default function Transactions() {
                 { k: "month", l: "This month" },
                 { k: "last", l: "Last month" },
               ] as { k: Range; l: string }[]).map((r) => (
-                <TouchableOpacity
-                  key={r.k}
-                  testID={`transactions-range-${r.k}`}
-                  onPress={() => setRange(r.k)}
-                  style={[styles.rangeChip, { backgroundColor: range === r.k ? theme.primary : theme.surface, borderColor: range === r.k ? theme.primary : theme.border }]}
-                >
-                  <Text style={{ color: range === r.k ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{r.l}</Text>
-                </TouchableOpacity>
+                <FilterChip key={r.k} testID={`transactions-range-${r.k}`} label={r.l} active={range === r.k} onPress={() => setRange(r.k)} />
               ))}
-              <TouchableOpacity
+              <FilterChip
                 testID="transactions-range-custom"
+                icon="calendar-clear-outline"
+                label={range === "custom" ? `${customRange.start} -> ${customRange.end}` : "Custom"}
+                active={range === "custom"}
                 onPress={() => { setRange("custom"); setShowCustom(true); }}
-                style={[styles.rangeChip, { backgroundColor: range === "custom" ? theme.primary : theme.surface, borderColor: range === "custom" ? theme.primary : theme.border }]}
-              >
-                <Text style={{ color: range === "custom" ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>
-                  {range === "custom" ? `${customRange.start} -> ${customRange.end}` : "Custom"}
-                </Text>
-              </TouchableOpacity>
+              />
             </ScrollView>
-          </View>
+          </FilterSection>
 
-          <View style={{ height: 56 }}>
-            <View style={styles.typeRow}>
-              {(["all", "income", "expense"] as const).map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  testID={`type-filter-${t}`}
-                  onPress={() => setFilter(t)}
-                  style={[styles.typeChip, { backgroundColor: filter === t ? theme.primary : theme.surface, borderColor: filter === t ? theme.primary : theme.border }]}
-                >
-                  <Text style={{ color: filter === t ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 13 }}>{t.charAt(0).toUpperCase() + t.slice(1)}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+          <FilterSection icon="swap-horizontal-outline" label="TYPE">
+            <SegmentedControl
+              value={filter}
+              onChange={(v) => setFilter(v as typeof filter)}
+              options={[
+                { key: "all", label: "All", testID: "type-filter-all" },
+                { key: "income", label: "Income", testID: "type-filter-income" },
+                { key: "expense", label: "Expense", testID: "type-filter-expense" },
+              ]}
+            />
+          </FilterSection>
+
+          {categories.length > 0 && (
+            <FilterSection icon="grid-outline" label="CATEGORY">
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {categories.map((c) => {
+                  const active = selectedCategoryNames.includes(c.name);
+                  return (
+                    <FilterChip
+                      key={c.id}
+                      testID={`category-filter-${c.id}`}
+                      icon={resolveCategoryIcon(c)}
+                      label={c.name}
+                      active={active}
+                      onPress={() => setSelectedCategoryNames((cur) => (active ? cur.filter((n) => n !== c.name) : [...cur, c.name]))}
+                    />
+                  );
+                })}
+              </View>
+            </FilterSection>
+          )}
 
           {tags.length > 0 && (
-            <>
-              <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", paddingHorizontal: 24 }}>TAGS</Text>
-              <MemberChips members={tags} selected={selectedTagIds} onChange={setSelectedTagIds} testID="tag-filter-chips" />
-            </>
+            <FilterSection icon="pricetags-outline" label="TAGS">
+              <MemberChips members={tags} selected={selectedTagIds} onChange={setSelectedTagIds} testID="tag-filter-chips" variant="tag" inline wrap />
+            </FilterSection>
           )}
-        </>
-      )}
+      </FilterModal>
 
       {!showFilters && (
         <View style={{ paddingHorizontal: 24, marginTop: 4, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
@@ -441,7 +448,7 @@ export default function Transactions() {
 
       <Modal transparent visible={showSort} animationType="slide" onRequestClose={() => setShowSort(false)}>
         <TouchableOpacity activeOpacity={1} onPress={() => setShowSort(false)} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Sort by</Text>
             {(groupByCategory
               ? ([
@@ -473,7 +480,7 @@ export default function Transactions() {
 
       <Modal transparent visible={showCustom} animationType="slide" onRequestClose={() => setShowCustom(false)}>
         <TouchableOpacity activeOpacity={1} onPress={() => setShowCustom(false)} style={styles.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Custom Date Range</Text>
             <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>Filter transactions between exact dates.</Text>
 
@@ -510,16 +517,6 @@ export default function Transactions() {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-
-      {showFilters && (
-        <TouchableOpacity
-          testID="transactions-filters-done"
-          onPress={() => setShowFilters(false)}
-          style={[styles.doneFab, { backgroundColor: theme.primary }]}
-        >
-          <Text style={{ color: theme.primaryText, fontWeight: "700" }}>Done</Text>
-        </TouchableOpacity>
-      )}
     </Screen>
   );
 }
@@ -530,9 +527,6 @@ const styles = StyleSheet.create({
   filterBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   sortBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   sortOptionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 14 },
-  rangeChip: { paddingHorizontal: 14, height: 32, borderRadius: 999, borderWidth: 1, justifyContent: "center" },
-  typeRow: { flexDirection: "row", paddingHorizontal: 24, gap: 8, alignItems: "center", height: 56 },
-  typeChip: { height: 36, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 20, borderWidth: 1, marginBottom: 10, gap: 12 },
   dot: { width: 10, height: 10, borderRadius: 5 },
   tagChip: { paddingHorizontal: 8, height: 22, borderRadius: 999, borderWidth: 1, justifyContent: "center" },
@@ -544,5 +538,4 @@ const styles = StyleSheet.create({
   groupSheetHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 },
   label: { fontSize: 11, letterSpacing: 2, fontWeight: "700", marginTop: 18, marginBottom: 8 },
   applyBtn: { marginTop: 20, paddingVertical: 14, borderRadius: 999, alignItems: "center" },
-  doneFab: { position: "absolute", right: 24, bottom: 24, paddingHorizontal: 18, height: 42, borderRadius: 999, justifyContent: "center", alignItems: "center" },
 });

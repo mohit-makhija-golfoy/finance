@@ -9,7 +9,7 @@ type Ctx = {
   setModeValue: (next: ThemeMode) => void;
 };
 
-const ThemeContext = createContext<Ctx | undefined>(undefined);
+export const ThemeContext = createContext<Ctx | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>("dark");

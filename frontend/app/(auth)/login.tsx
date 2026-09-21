@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, Modal } from "react-native";
 import { useRouter, Link, useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useTheme } from "@/src/contexts/ThemeContext";
 import { api } from "@/src/api/client";
@@ -11,10 +12,10 @@ export default function Login() {
   const { login } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [debugUsers, setDebugUsers] = useState<{ id: string; email: string; full_name?: string | null; password_hash: string }[]>([]);
+  const [debugUsers, setDebugUsers] = useState<{ id: string; email: string; full_name?: string | null }[]>([]);
+  const [showUserPicker, setShowUserPicker] = useState(false);
 
   const loadDebugUsers = useCallback(async () => {
     try {
@@ -39,7 +40,7 @@ export default function Login() {
     setError(null);
     setLoading(true);
     try {
-      await login(email.trim(), password);
+      await login(email.trim());
       router.replace("/(app)/");
     } catch (e: any) {
       setError(e.message || "Login failed");
@@ -58,7 +59,14 @@ export default function Login() {
 
           <View style={{ height: 32 }} />
 
-          <Text style={[styles.label, { color: theme.textMuted }]}>EMAIL</Text>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Text style={[styles.label, { color: theme.textMuted }]}>EMAIL</Text>
+            {debugUsers.length > 0 && (
+              <TouchableOpacity testID="choose-user-button" onPress={() => setShowUserPicker(true)}>
+                <Text style={{ color: theme.text, fontSize: 11, fontWeight: "700" }}>Choose user ▾</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <TextInput
             testID="email-input"
             style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surface }]}
@@ -68,17 +76,6 @@ export default function Login() {
             placeholderTextColor={theme.textMuted}
             value={email}
             onChangeText={setEmail}
-          />
-
-          <Text style={[styles.label, { color: theme.textMuted, marginTop: 20 }]}>PASSWORD</Text>
-          <TextInput
-            testID="password-input"
-            style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.surface }]}
-            secureTextEntry
-            placeholder="••••••••"
-            placeholderTextColor={theme.textMuted}
-            value={password}
-            onChangeText={setPassword}
           />
 
           {error && <Text testID="login-error" style={[styles.error, { color: theme.negative }]}>{error}</Text>}
@@ -97,29 +94,32 @@ export default function Login() {
             <Text style={{ color: theme.textMuted }}>New here? </Text>
             <Link testID="goto-register" href="/(auth)/register" style={{ color: theme.text, fontWeight: "700" }}>Create account</Link>
           </View>
-
-          <View style={[styles.debugWrap, { borderColor: theme.border, backgroundColor: theme.surface }]}>
-            <View style={styles.debugHeader}>
-              <Text style={[styles.debugTitle, { color: theme.text }]}>Available local users</Text>
-              <TouchableOpacity testID="refresh-users" onPress={loadDebugUsers} style={[styles.refreshBtn, { borderColor: theme.border }]}>
-                <Text style={{ color: theme.textMuted, fontSize: 12, fontWeight: "700" }}>Refresh</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={[styles.debugHint, { color: theme.textMuted }]}>Passwords are not stored in plain text. The value below is SHA256 hash.</Text>
-            {debugUsers.length === 0 ? (
-              <Text style={{ color: theme.textMuted, marginTop: 8 }}>No local users found.</Text>
-            ) : (
-              debugUsers.map((u) => (
-                <View key={u.id} style={[styles.userCard, { borderColor: theme.border }]}>
-                  <Text style={{ color: theme.text, fontWeight: "700" }}>{u.email}</Text>
-                  {u.full_name ? <Text style={{ color: theme.textMuted, marginTop: 2 }}>{u.full_name}</Text> : null}
-                  <Text selectable style={[styles.hashText, { color: theme.textMuted }]}>password_hash: {u.password_hash}</Text>
-                </View>
-              ))
-            )}
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal transparent visible={showUserPicker} animationType="fade" onRequestClose={() => setShowUserPicker(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setShowUserPicker(false)} style={styles.pickerBackdrop}>
+          <View style={[styles.pickerSheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Text style={[styles.debugTitle, { color: theme.text, marginBottom: 8 }]}>Select a user</Text>
+            <ScrollView style={{ maxHeight: 320 }}>
+              {debugUsers.map((u) => (
+                <TouchableOpacity
+                  key={u.id}
+                  testID={`choose-user-${u.id}`}
+                  onPress={() => { setEmail(u.email); setShowUserPicker(false); }}
+                  style={[styles.pickerOption, email === u.email && { backgroundColor: theme.background }]}
+                >
+                  <View>
+                    <Text style={{ color: theme.text, fontWeight: "700" }}>{u.email}</Text>
+                    {u.full_name ? <Text style={{ color: theme.textMuted, marginTop: 2, fontSize: 12 }}>{u.full_name}</Text> : null}
+                  </View>
+                  {email === u.email && <Ionicons name="checkmark" size={18} color={theme.primary} />}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </Screen>
   );
 }
@@ -135,11 +135,8 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.3 },
   error: { marginTop: 12, fontSize: 14 },
   footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
-  debugWrap: { marginTop: 24, borderWidth: 1, borderRadius: 14, padding: 12 },
-  debugHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   debugTitle: { fontSize: 14, fontWeight: "700" },
-  refreshBtn: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  debugHint: { fontSize: 12, marginTop: 4 },
-  userCard: { marginTop: 10, borderWidth: 1, borderRadius: 10, padding: 10 },
-  hashText: { marginTop: 8, fontSize: 11 },
+  pickerBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
+  pickerSheet: { width: "85%", maxWidth: 360, borderRadius: 16, borderWidth: 1, padding: 16 },
+  pickerOption: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 12, paddingHorizontal: 10, borderRadius: 10 },
 });

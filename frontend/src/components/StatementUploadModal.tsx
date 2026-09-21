@@ -164,7 +164,7 @@ export default function StatementUploadModal({ visible, onClose, members, onPars
             : [styles.backdrop, { position: "absolute", top: -insets.top, left: 0, right: 0, bottom: 0 }]
         }
       >
-        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Upload Statement</Text>
           <Text style={{ color: theme.textMuted, marginTop: 6, fontSize: 13 }}>

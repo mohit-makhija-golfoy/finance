@@ -7,6 +7,8 @@ import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { ThemeProvider } from "@/src/contexts/ThemeContext";
 import { AuthProvider } from "@/src/contexts/AuthContext";
 import { FilterProvider } from "@/src/contexts/FilterContext";
+import { CurrencyProvider } from "@/src/contexts/CurrencyContext";
+import { ToastProvider } from "@/src/contexts/ToastContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -24,11 +26,15 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <AuthProvider>
-          <FilterProvider>
-            <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
-          </FilterProvider>
-        </AuthProvider>
+        <ToastProvider>
+          <CurrencyProvider>
+            <AuthProvider>
+              <FilterProvider>
+                <Stack screenOptions={{ headerShown: false, animation: "fade" }} />
+              </FilterProvider>
+            </AuthProvider>
+          </CurrencyProvider>
+        </ToastProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

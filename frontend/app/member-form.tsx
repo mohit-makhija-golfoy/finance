@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform } from "react-native";
+import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from "react-native";
 import { useLocalSearchParams, useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
@@ -28,13 +28,15 @@ export default function MemberForm() {
   }, [id]);
 
   const save = async () => {
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       Alert.alert("Missing info", "Name is required.");
       return;
     }
     setSaving(true);
     try {
-      const body = { name, relation, color };
+      const capitalizedName = trimmedName.replace(/\s+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      const body = { name: capitalizedName, relation, color };
       if (id) await api.put(`/members/${id}`, body);
       else await api.post("/members", body);
       router.back();
@@ -55,7 +57,7 @@ export default function MemberForm() {
           <TouchableOpacity testID="save-member-btn" onPress={save} disabled={saving}><Text style={{ color: theme.text, fontWeight: "700", opacity: saving ? 0.5 : 1 }}>{saving ? "Saving..." : "Save"}</Text></TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 24 }} keyboardShouldPersistTaps="handled">
-          <Field label="NAME"><TextInput testID="member-name" value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={theme.textMuted} style={inputStyle(theme)} /></Field>
+          <Field label="NAME"><TextInput testID="member-name" value={name} onChangeText={setName} placeholder="Name" placeholderTextColor={theme.textMuted} autoCapitalize="words" style={inputStyle(theme)} /></Field>
 
           <Field label="RELATION">
             <View style={styles.chipRow}>

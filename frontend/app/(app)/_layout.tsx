@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { useTheme } from "@/src/contexts/ThemeContext";
 
@@ -8,6 +9,7 @@ export default function AppLayout() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!loading && !user) router.replace("/(auth)/login");
@@ -23,9 +25,9 @@ export default function AppLayout() {
           backgroundColor: theme.background,
           borderTopColor: theme.border,
           borderTopWidth: 1,
-          height: 64,
+          height: 64 + insets.bottom,
           paddingTop: 8,
-          paddingBottom: 12,
+          paddingBottom: 12 + insets.bottom,
         },
         tabBarActiveTintColor: theme.text,
         tabBarInactiveTintColor: theme.textMuted,

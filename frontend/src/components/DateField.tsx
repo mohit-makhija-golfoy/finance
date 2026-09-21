@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Platform, Modal } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useTheme } from "@/src/contexts/ThemeContext";
+import { formatLongDate } from "@/src/utils/date";
 
 type Props = {
   value: string; // YYYY-MM-DD
@@ -53,7 +54,7 @@ export default function DateField({ value, onChange, placeholder = "Pick date", 
         style={[styles.input, { borderColor: theme.border, backgroundColor: theme.surface }]}
         activeOpacity={0.7}
       >
-        <Text style={{ color: value ? theme.text : theme.textMuted, fontSize: 16 }}>{value || placeholder}</Text>
+        <Text style={{ color: value ? theme.text : theme.textMuted, fontSize: 16 }}>{value ? formatLongDate(value) : placeholder}</Text>
       </TouchableOpacity>
       {show && (
         Platform.OS === "ios" ? (

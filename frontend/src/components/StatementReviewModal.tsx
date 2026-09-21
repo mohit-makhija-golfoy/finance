@@ -574,7 +574,7 @@ export default function StatementReviewModal({
           }
         >
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%" }}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Edit entry</Text>
             {editingEntry && (
               <Text style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }} numberOfLines={2}>{editingEntry.description}</Text>
@@ -700,7 +700,7 @@ export default function StatementReviewModal({
           }
         >
           <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ width: "100%" }}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={[styles.sheet, { backgroundColor: theme.surface, borderColor: theme.border, paddingBottom: 20 + insets.bottom }]}>
             <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>Approve suggestion</Text>
             {approvingGroup && (
               <Text style={{ color: theme.textMuted, marginTop: 4, fontSize: 12 }}>

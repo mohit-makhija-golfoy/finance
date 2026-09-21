@@ -3,11 +3,14 @@ import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Keyboa
 import { useRouter, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
+import { useToast } from "@/src/contexts/ToastContext";
 import { api } from "@/src/api/client";
 import Screen from "@/src/components/Screen";
+import { confirmAction } from "@/src/utils/confirm";
 
 export default function Tags() {
   const { theme } = useTheme();
+  const { showToast } = useToast();
   const router = useRouter();
   const [items, setItems] = useState<any[]>([]);
   const [newName, setNewName] = useState("");
@@ -25,13 +28,14 @@ export default function Tags() {
     await api.post("/tags", { name });
     setNewName("");
     load();
+    showToast(`"${name}" tag added`);
   };
 
   const remove = (id: string) => {
-    Alert.alert("Delete tag?", "It will be removed from any transactions using it.", [
-      { text: "Cancel" },
-      { text: "Delete", style: "destructive", onPress: async () => { await api.del(`/tags/${id}`); load(); } },
-    ]);
+    confirmAction("Delete tag?", "It will be removed from any transactions using it.", "Delete", async () => {
+      await api.del(`/tags/${id}`);
+      load();
+    });
   };
 
   const edit = (id: string, name: string) => {

@@ -6,7 +6,8 @@ import { useTheme } from "@/src/contexts/ThemeContext";
 import { api } from "@/src/api/client";
 import { inrFull, inr } from "@/src/constants/theme";
 import Screen from "@/src/components/Screen";
-import { toLocalYMD } from "@/src/utils/date";
+import { confirmAction } from "@/src/utils/confirm";
+import { toLocalYMD, formatLongDate, formatDateTime } from "@/src/utils/date";
 
 export default function LoanDetail() {
   const { theme } = useTheme();
@@ -34,23 +35,25 @@ export default function LoanDetail() {
   const progress = progressBase > 0 ? Math.min(1, displayPaid / progressBase) : 0;
 
   const catchUp = () => {
-    Alert.alert("Catch up to today?", `Record ₹${Math.round(loan.expected_paid_to_date - loan.total_paid)} as a backdated EMI lump (recommended for loans imported mid-tenure).`, [
-      { text: "Cancel" },
-      { text: "Record", onPress: async () => {
+    confirmAction(
+      "Catch up to today?",
+      `Record ${inr(Math.round(loan.expected_paid_to_date - loan.total_paid))} as a backdated EMI lump (recommended for loans imported mid-tenure).`,
+      "Record",
+      async () => {
         const delta = (loan.expected_paid_to_date || 0) - (loan.total_paid || 0);
         if (delta > 0) {
           await api.post(`/loans/${id}/payment`, { amount: delta, date: toLocalYMD(new Date()), type: "emi", notes: "Backdated catch-up" });
           load();
         }
-      } },
-    ]);
+      }
+    );
   };
 
   const close = () => {
-    Alert.alert("Close loan?", "Mark as fully closed.", [
-      { text: "Cancel" },
-      { text: "Close", style: "destructive", onPress: async () => { await api.post(`/loans/${id}/close`); load(); } },
-    ]);
+    confirmAction("Close loan?", "Mark as fully closed.", "Close", async () => {
+      await api.post(`/loans/${id}/close`);
+      load();
+    });
   };
 
   return (
@@ -97,8 +100,8 @@ export default function LoanDetail() {
               <Row label="Installments gone" value={`${loan.installments_gone_before_current || 0}${loan.current_month_paid ? " + current" : ""}`} />
               <Row label={expectedAhead ? "Paid (expected)" : "Paid"} value={inr(displayPaid)} />
               {expectedAhead && (loan.total_paid || 0) > 0 ? <Row label="Actually recorded" value={inr(loan.total_paid)} /> : null}
-              <Row label="Start" value={loan.start_date} />
-              {loan.end_date && <Row label="End" value={loan.end_date} />}
+              <Row label="Start" value={formatLongDate(loan.start_date)} />
+              {loan.end_date && <Row label="End" value={formatLongDate(loan.end_date)} />}
             </View>
 
             {installmentTimeline.length > 0 && (
@@ -107,7 +110,7 @@ export default function LoanDetail() {
                 {installmentTimeline.map((item: any, index: number) => (
                   <View key={`${item.month_key}-${index}`} style={[styles.payRow, { borderBottomColor: theme.border }]}> 
                     <View>
-                      <Text style={{ color: theme.text, fontWeight: "600" }}>{item.date}</Text>
+                      <Text style={{ color: theme.text, fontWeight: "600" }}>{formatLongDate(item.date)}</Text>
                       <Text style={{ color: theme.textMuted, fontSize: 12 }}>
                         {item.status === "recorded" ? "Recorded" : "Expected"}
                       </Text>
@@ -125,7 +128,8 @@ export default function LoanDetail() {
                   <View key={p.id} style={[styles.payRow, { borderBottomColor: theme.border }]}>
                     <View>
                       <Text style={{ color: theme.text, fontWeight: "600" }}>{p.type.toUpperCase()}</Text>
-                      <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatDateTime(p.date, p.created_at)}</Text>
+                      <Text style={{ color: theme.textMuted, fontSize: 12 }}>{formatLongDate(p.date)}</Text>
+                      {p.created_at && <Text style={{ color: theme.textMuted, fontSize: 11, marginTop: 2 }}>Recorded {formatDateTime(p.created_at)}</Text>}
                     </View>
                     <Text style={{ color: theme.text, fontWeight: "700" }}>{inr(p.amount)}</Text>
                   </View>
@@ -140,10 +144,10 @@ export default function LoanDetail() {
             )}
 
             <TouchableOpacity testID="delete-loan-btn" onPress={() => {
-              Alert.alert("Delete?", "Permanently remove this loan and its payment history?", [
-                { text: "Cancel" },
-                { text: "Delete", style: "destructive", onPress: async () => { await api.del(`/loans/${id}`); router.back(); } },
-              ]);
+              confirmAction("Delete?", "Permanently remove this loan and its payment history?", "Delete", async () => {
+                await api.del(`/loans/${id}`);
+                router.back();
+              });
             }} style={[styles.btnFull, { borderColor: theme.border, marginTop: 10 }]}>
               <Text style={{ color: theme.negative, fontWeight: "700" }}>Delete permanently</Text>
             </TouchableOpacity>
@@ -157,20 +161,6 @@ export default function LoanDetail() {
 function Row({ label, value }: any) {
   const { theme } = useTheme();
   return (<View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 10 }}><Text style={{ color: theme.textMuted }}>{label}</Text><Text style={{ color: theme.text, fontWeight: "600" }}>{value}</Text></View>);
-}
-
-function formatDateTime(date?: string, createdAt?: string) {
-  const raw = createdAt || (date ? `${date}T00:00:00` : "");
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return date || "-";
-  return d.toLocaleString("en-US", {
-    month: "long",
-    day: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
 }
 
 const styles = StyleSheet.create({

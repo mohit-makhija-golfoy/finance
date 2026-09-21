@@ -3,6 +3,7 @@ import { View, Text, TextInput, StyleSheet, ScrollView, TouchableOpacity, Keyboa
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/src/contexts/ThemeContext";
+import { useCurrency } from "@/src/contexts/CurrencyContext";
 import { api } from "@/src/api/client";
 import Screen from "@/src/components/Screen";
 import DateField from "@/src/components/DateField";
@@ -12,6 +13,7 @@ import Checkbox from "@/src/components/Checkbox";
 import { guessKeyword, matchCategoryRule } from "@/src/utils/categoryRules";
 import type { StatementEntry } from "@/src/types/statement";
 import { toLocalYMD } from "@/src/utils/date";
+import { resolveCategoryIcon, getInitials } from "@/src/utils/categoryIcons";
 
 const IMPORTED_CATEGORY = "Imported";
 const BANK_STATEMENT_TAG = "Bank Statement";
@@ -37,6 +39,7 @@ function parseAutoReference(note?: string | null) {
 
 export default function TransactionForm() {
   const { theme } = useTheme();
+  const { currency } = useCurrency();
   const router = useRouter();
   const { id: rawId } = useLocalSearchParams<{ id?: string | string[] }>();
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
@@ -286,87 +289,138 @@ export default function TransactionForm() {
     <Screen>
       <Stack.Screen options={{ headerShown: false }} />
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        <View style={styles.topBar}>
-          <TouchableOpacity testID="back-btn" onPress={() => router.back()}><Ionicons name="close" size={24} color={theme.text} /></TouchableOpacity>
+        <View style={[styles.topBar, { borderBottomColor: theme.border }]}>
+          <TouchableOpacity testID="back-btn" onPress={() => router.back()} style={[styles.closeBtn, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Ionicons name="close" size={20} color={theme.text} />
+          </TouchableOpacity>
           <Text style={{ color: theme.text, fontSize: 18, fontWeight: "700" }}>{id ? "Edit" : "New"} Transaction</Text>
-          <TouchableOpacity testID="save-tx-btn" onPress={save} disabled={saving}><Text style={{ color: theme.text, fontWeight: "700", opacity: saving ? 0.5 : 1 }}>{saving ? "Saving..." : "Save"}</Text></TouchableOpacity>
+          <TouchableOpacity testID="save-tx-btn" onPress={save} disabled={saving} style={[styles.saveBtn, { backgroundColor: theme.primary, opacity: saving ? 0.6 : 1 }]}>
+            <Text style={{ color: theme.primaryText, fontWeight: "700" }}>{saving ? "Saving..." : "Save"}</Text>
+          </TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: id ? 120 : 180 }} keyboardShouldPersistTaps="handled">
           <View style={styles.toggle}>
-            {(["expense", "income"] as const).map((t) => (
-              <TouchableOpacity key={t} testID={`type-${t}`} onPress={() => {
-                setType(t);
-                const first = categories.find((c) => c.type === t);
-                if (first) setCategory(first.name);
-              }} style={[styles.toggleBtn, { backgroundColor: type === t ? theme.primary : theme.surface, borderColor: type === t ? theme.primary : theme.border }]}>
-                <Text style={{ color: type === t ? theme.primaryText : theme.text, fontWeight: "700" }}>{t === "income" ? "Income" : "Expense"}</Text>
-              </TouchableOpacity>
-            ))}
+            {(["expense", "income"] as const).map((t) => {
+              const active = type === t;
+              const activeColor = t === "income" ? theme.positive : theme.negative;
+              return (
+                <TouchableOpacity key={t} testID={`type-${t}`} onPress={() => {
+                  setType(t);
+                  const first = categories.find((c) => c.type === t);
+                  if (first) setCategory(first.name);
+                }} style={[styles.toggleBtn, { backgroundColor: active ? activeColor + "1F" : theme.surface, borderColor: active ? activeColor : theme.border }]}>
+                  <Ionicons name={t === "income" ? "arrow-down-circle" : "arrow-up-circle"} size={16} color={active ? activeColor : theme.textMuted} />
+                  <Text style={{ color: active ? activeColor : theme.text, fontWeight: "700" }}>{t === "income" ? "Income" : "Expense"}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          <Field label="AMOUNT (\u20B9)"><TextInput testID="amount-input" keyboardType="decimal-pad" value={amount} onChangeText={setAmount} placeholder="0" placeholderTextColor={theme.textMuted} style={inputStyle(theme)} /></Field>
-
-          <Field label="CATEGORY">
-            <View style={styles.chipRow}>
-              {cats.map((c) => (
-                <TouchableOpacity key={c.id} testID={`cat-${c.name}`} onPress={() => setCategory(c.name)}
-                  style={[styles.chip, { backgroundColor: category === c.name ? theme.primary : theme.surface, borderColor: category === c.name ? theme.primary : theme.border }]}>
-                  <Text style={{ color: category === c.name ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{c.name}</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity testID="manage-categories" onPress={() => router.push("/categories")}
-                style={[styles.chip, { backgroundColor: "transparent", borderColor: theme.border, borderStyle: "dashed" as any }]}>
-                <Text style={{ color: theme.textMuted, fontWeight: "600", fontSize: 12 }}>＋ Manage</Text>
-              </TouchableOpacity>
+          <View style={styles.dateMemberRow}>
+            <View style={{ width: 150 }}>
+              <Field label="DATE" icon="calendar-outline"><DateField testID="date-input" value={date} onChange={setDate} /></Field>
             </View>
-            <View style={{ marginTop: 12 }}>
-              <Checkbox
-                testID="apply-rule-to-all"
-                value={applyToAll}
-                onChange={toggleApplyToAll}
-                label="Apply this category & tags to all transactions with a similar note"
+            <View style={{ flex: 1 }}>
+              <Field label="MEMBER" icon="people-outline">
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberRow}>
+                  {members.map((m) => {
+                    const selected = memberId === m.id;
+                    return (
+                      <TouchableOpacity key={m.id} testID={`member-${m.id}`} onPress={() => setMemberId(m.id)} style={styles.memberItem} activeOpacity={0.8}>
+                        <View style={[styles.avatar, { backgroundColor: theme.surface, borderColor: selected ? theme.positive : theme.border, borderWidth: selected ? 2 : 1 }]}>
+                          <Text style={{ color: m.color || theme.text, fontWeight: "700", fontSize: 15 }}>{getInitials(m.name)}</Text>
+                          {selected && (
+                            <View style={[styles.avatarCheck, { backgroundColor: theme.positive, borderColor: theme.background }]}>
+                              <Ionicons name="checkmark" size={10} color="#fff" />
+                            </View>
+                          )}
+                        </View>
+                        <Text numberOfLines={1} style={{ color: selected ? theme.text : theme.textMuted, fontSize: 11, fontWeight: selected ? "700" : "600", marginTop: 6, maxWidth: 64, textAlign: "center" }}>{m.name}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </Field>
+            </View>
+          </View>
+
+          <Field label="AMOUNT" icon="cash-outline">
+            <View style={[styles.amountCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <Text style={[styles.amountSymbol, { color: type === "income" ? theme.positive : theme.text }]}>{currency.symbol}</Text>
+              <TextInput
+                testID="amount-input"
+                keyboardType="decimal-pad"
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0"
+                placeholderTextColor={theme.textMuted}
+                style={[styles.amountInput, { color: type === "income" ? theme.positive : theme.text }]}
               />
-              {applyToAll && (
-                <TextInput
-                  testID="apply-rule-keyword"
-                  value={applyKeyword}
-                  onChangeText={setApplyKeyword}
-                  placeholder="Match keyword (e.g. Zomato)"
-                  placeholderTextColor={theme.textMuted}
-                  style={[inputStyle(theme), { marginTop: 8 }]}
-                />
-              )}
             </View>
           </Field>
 
-          <Field label="MEMBER">
-            <View style={styles.chipRow}>
-              {members.map((m) => (
-                <TouchableOpacity key={m.id} testID={`member-${m.id}`} onPress={() => setMemberId(m.id)}
-                  style={[styles.chip, { backgroundColor: memberId === m.id ? theme.primary : theme.surface, borderColor: memberId === m.id ? theme.primary : theme.border }]}>
-                  <Text style={{ color: memberId === m.id ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{m.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </Field>
-
-          <Field label="TAGS">
-            <View style={styles.chipRow}>
-              {tags.map((t) => (
-                <TouchableOpacity key={t.id} testID={`tag-${t.id}`} onPress={() => toggleTag(t.id)}
-                  style={[styles.chip, { backgroundColor: tagIds.includes(t.id) ? theme.primary : theme.surface, borderColor: tagIds.includes(t.id) ? theme.primary : theme.border }]}>
-                  <Text style={{ color: tagIds.includes(t.id) ? theme.primaryText : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{t.name}</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity testID="manage-tags" onPress={() => router.push("/tags")}
-                style={[styles.chip, { backgroundColor: "transparent", borderColor: theme.border, borderStyle: "dashed" as any }]}>
-                <Text style={{ color: theme.textMuted, fontWeight: "600", fontSize: 12 }}>＋ Manage</Text>
+          <Field label="CATEGORY" icon="grid-outline">
+            <View style={styles.categoryGrid}>
+              {cats.map((c) => {
+                const selected = category === c.name;
+                return (
+                  <TouchableOpacity key={c.id} testID={`cat-${c.name}`} onPress={() => setCategory(c.name)} style={styles.categoryCard} activeOpacity={0.8}>
+                    <View style={[styles.categoryIconWrap, { backgroundColor: selected ? theme.primary : theme.surface, borderColor: selected ? theme.primary : theme.border }]}>
+                      <Ionicons name={resolveCategoryIcon(c)} size={20} color={selected ? theme.primaryText : theme.text} />
+                    </View>
+                    <Text numberOfLines={1} style={{ color: selected ? theme.text : theme.textMuted, fontSize: 11, fontWeight: selected ? "700" : "600", marginTop: 6, maxWidth: 68, textAlign: "center" }}>{c.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity testID="manage-categories" onPress={() => router.push("/categories")} style={styles.categoryCard} activeOpacity={0.8}>
+                <View style={[styles.categoryIconWrap, { backgroundColor: "transparent", borderColor: theme.border, borderStyle: "dashed" }]}>
+                  <Ionicons name="add" size={20} color={theme.textMuted} />
+                </View>
+                <Text style={{ color: theme.textMuted, fontSize: 11, fontWeight: "600", marginTop: 6 }}>Manage</Text>
               </TouchableOpacity>
             </View>
           </Field>
 
-          <Field label="DATE"><DateField testID="date-input" value={date} onChange={setDate} /></Field>
-          <Field label="NOTES">
+          <Field label="TAGS" icon="pricetags-outline">
+            <View style={styles.chipRow}>
+              {tags.map((t) => {
+                const selected = tagIds.includes(t.id);
+                return (
+                  <TouchableOpacity key={t.id} testID={`tag-${t.id}`} onPress={() => toggleTag(t.id)}
+                    style={[styles.tagPill, { backgroundColor: selected ? theme.primary + "1F" : theme.surface, borderColor: selected ? theme.primary : theme.border }]}>
+                    {selected && <Ionicons name="checkmark" size={12} color={theme.primary} style={{ marginRight: 4 }} />}
+                    <Text style={{ color: selected ? theme.text : theme.textMuted, fontWeight: "600", fontSize: 12 }}>{t.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity testID="manage-tags" onPress={() => router.push("/tags")}
+                style={[styles.tagPill, { backgroundColor: "transparent", borderColor: theme.border, borderStyle: "dashed" }]}>
+                <Ionicons name="add" size={13} color={theme.textMuted} />
+                <Text style={{ color: theme.textMuted, fontWeight: "600", fontSize: 12, marginLeft: 3 }}>Manage</Text>
+              </TouchableOpacity>
+            </View>
+          </Field>
+
+          <View style={{ marginTop: 20 }}>
+            <Checkbox
+              testID="apply-rule-to-all"
+              value={applyToAll}
+              onChange={toggleApplyToAll}
+              label="Apply this category & tags to all transactions with a similar note"
+            />
+            {applyToAll && (
+              <TextInput
+                testID="apply-rule-keyword"
+                value={applyKeyword}
+                onChangeText={setApplyKeyword}
+                placeholder="Match keyword (e.g. Zomato)"
+                placeholderTextColor={theme.textMuted}
+                style={[inputStyle(theme), { marginTop: 8 }]}
+              />
+            )}
+          </View>
+
+          <Field label="NOTES" icon="document-text-outline">
             <TextInput testID="notes-input" value={notes} onChangeText={setNotes} placeholder="Optional" placeholderTextColor={theme.textMuted} style={inputStyle(theme)} />
             {linked && (
               <View style={{ marginTop: 10 }}>
@@ -450,17 +504,39 @@ export default function TransactionForm() {
   );
 }
 
-function Field({ label, children }: any) {
+function Field({ label, icon, children }: any) {
   const { theme } = useTheme();
-  return (<View style={{ marginTop: 20 }}><Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700", marginBottom: 8 }}>{label}</Text>{children}</View>);
+  return (
+    <View style={{ marginTop: 20 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        {icon && <Ionicons name={icon} size={13} color={theme.textMuted} />}
+        <Text style={{ color: theme.textMuted, fontSize: 11, letterSpacing: 2, fontWeight: "700" }}>{label}</Text>
+      </View>
+      {children}
+    </View>
+  );
 }
 const inputStyle = (theme: any) => ({ borderWidth: 1, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: theme.text, borderColor: theme.border, backgroundColor: theme.surface, minHeight: 52 });
 const styles = StyleSheet.create({
-  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, paddingTop: 20 },
+  topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, paddingTop: 20, borderBottomWidth: 1 },
+  closeBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  saveBtn: { paddingHorizontal: 18, height: 36, borderRadius: 999, alignItems: "center", justifyContent: "center" },
   toggle: { flexDirection: "row", gap: 8 },
-  toggleBtn: { flex: 1, paddingVertical: 14, borderRadius: 999, borderWidth: 1, alignItems: "center" },
+  toggleBtn: { flex: 1, flexDirection: "row", gap: 6, paddingVertical: 14, borderRadius: 999, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  dateMemberRow: { flexDirection: "row", gap: 12 },
+  amountCard: { flexDirection: "row", alignItems: "center", justifyContent: "center", borderRadius: 20, borderWidth: 1, paddingVertical: 20, paddingHorizontal: 16 },
+  amountSymbol: { fontSize: 30, fontWeight: "700", marginLeft: 10, marginRight: 6 },
+  amountInput: { fontSize: 40, fontWeight: "700", minWidth: 60, textAlign: "center", padding: 0 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { paddingHorizontal: 14, height: 36, borderRadius: 999, borderWidth: 1, justifyContent: "center" },
+  tagPill: { flexDirection: "row", alignItems: "center", paddingHorizontal: 13, height: 34, borderRadius: 999, borderWidth: 1 },
+  categoryGrid: { flexDirection: "row", flexWrap: "wrap", rowGap: 14, columnGap: 10 },
+  categoryCard: { width: 68, alignItems: "center" },
+  categoryIconWrap: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  memberRow: { flexDirection: "row", gap: 16, paddingRight: 8 },
+  memberItem: { alignItems: "center" },
+  avatar: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
+  avatarCheck: { position: "absolute", right: -2, bottom: -2, width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", borderWidth: 2 },
   uploadBar: { position: "absolute", left: 0, right: 0, bottom: 0, padding: 16, borderTopWidth: 1 },
   uploadBtn: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: 14, borderRadius: 999, borderWidth: 1 },
 });
