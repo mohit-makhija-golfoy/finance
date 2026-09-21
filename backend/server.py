@@ -325,6 +325,9 @@ async def enrich_investment(inv: dict) -> dict:
             history_sorted = sorted(history, key=lambda x: x["date"])
             inv["current_value"] = history_sorted[-1]["current_value"]
         else:
+            # current_value intentionally stays at principal (not the projected
+            # maturity amount) until a real value update is recorded — net worth
+            # must reflect money actually held today, not unrealized future interest.
             inv["current_value"] = inv.get("current_value") or inv["total_invested"]
     elif inv_type == "recurring":
         end = inv.get("end_date") if inv.get("status") == "closed" else None
